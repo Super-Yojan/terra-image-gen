@@ -29,9 +29,10 @@
 # X-Env-Var-rover_url-Valid: string-or-empty
 # X-Env-Var-rover_url-Set: y
 #
-# X-Env-Var-rover_sha256:
+# X-Env-Var-rover_sha256: 4c537d1123e8e74992c46d68a218d6da5575a1461f9c29e7cbd5d887c9cd6553
 # X-Env-Var-rover_sha256-Desc: sha256 of the terra-rover tarball. Required.
 #  The install hook refuses to continue when this is empty or does not match.
+#  Default is the rover-v0.2.0 GitHub Release asset.
 # X-Env-Var-rover_sha256-Valid: string-or-empty
 # X-Env-Var-rover_sha256-Set: y
 #

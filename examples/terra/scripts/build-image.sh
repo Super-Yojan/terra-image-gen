@@ -45,11 +45,9 @@ if [[ -n $tarball ]]; then
    echo "$sha  $tarball" | sha256sum -c -
 else
    [[ $sha =~ ^[0-9a-f]{64}$ ]] || {
-      echo "build-image: no terra-rover tarball." >&2
-      echo "Terra has no GitHub Release for this pin yet. Build one and pass it:" >&2
-      echo "  git clone $TERRA_GIT_URL terra-src && cd terra-src && git checkout $TERRA_GIT_REF" >&2
-      echo "  docker buildx build --platform linux/arm64 -f packaging/rover/Dockerfile --output type=local,dest=/tmp/terra-dist ." >&2
-      echo "  TERRA_ROVER_TARBALL=/tmp/terra-dist/terra-rover-${TERRA_ROVER_VERSION}-linux-arm64.tar.gz $0" >&2
+      echo "build-image: TERRA_ROVER_SHA256 is not a 64-digit sha256." >&2
+      echo "The default pin is the rover-v${TERRA_ROVER_VERSION} release. To use a local build instead:" >&2
+      echo "  TERRA_ROVER_TARBALL=/path/terra-rover-${TERRA_ROVER_VERSION}-linux-arm64.tar.gz TERRA_ROVER_SHA256=<sha256> $0" >&2
       exit 1
    }
    cache=$root/work/terra-cache

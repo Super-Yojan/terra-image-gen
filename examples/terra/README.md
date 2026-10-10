@@ -15,25 +15,18 @@ sudo apt-get install -y qemu-user-static binfmt-support bmap-tools xz-utils mtoo
 sudo ./install_deps.sh
 ```
 
-Terra does not publish GitHub Releases yet, so the rover binary is a pinned tarball you supply. Build it from the Terra commit in `examples/terra/pins.env` with Terra's existing recipe:
+`examples/terra/pins.env` pins terra-rover 0.2.0 to the GitHub Release [rover-v0.2.0](https://github.com/Super-Yojan/Terra/releases/tag/rover-v0.2.0). From this repository:
 
 ```sh
-git clone https://github.com/Super-Yojan/Terra.git
-cd Terra
-git checkout f08d0c15ebe2c585169d68448c42745d300cd9be
-docker buildx build --platform linux/arm64 \
-  -f packaging/rover/Dockerfile \
-  --output type=local,dest=/tmp/terra-dist .
+./examples/terra/scripts/build-image.sh
 ```
 
-Then, from this repository:
+That downloads `terra-rover-0.2.0-linux-arm64.tar.gz` and refuses to continue unless its sha256 is `4c537d1123e8e74992c46d68a218d6da5575a1461f9c29e7cbd5d887c9cd6553`. A local file skips the download. It is checked against the same pin unless you also set `TERRA_ROVER_SHA256`:
 
 ```sh
-TERRA_ROVER_TARBALL=/tmp/terra-dist/terra-rover-0.2.0-linux-arm64.tar.gz \
+TERRA_ROVER_TARBALL=/path/to/terra-rover-0.2.0-linux-arm64.tar.gz \
   ./examples/terra/scripts/build-image.sh
 ```
-
-The script checks the tarball sha256 (from `TERRA_ROVER_SHA256` or the sibling `.sha256` file) and refuses to embed a binary it has not hashed. Once `rover-v0.2.0` exists on GitHub Releases, a matching `TERRA_ROVER_SHA256` in `pins.env` is enough and the URL is downloaded for you.
 
 Outputs (names follow the artefact version directory):
 

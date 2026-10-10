@@ -28,7 +28,7 @@ terra:
   source_ref: f08d0c15ebe2c585169d68448c42745d300cd9be
   rover_version: 0.2.0
   rover_url: https://github.com/Super-Yojan/Terra/releases/download/rover-v0.2.0/terra-rover-0.2.0-linux-arm64.tar.gz
-  rover_sha256: ""
+  rover_sha256: 4c537d1123e8e74992c46d68a218d6da5575a1461f9c29e7cbd5d887c9cd6553
   rover_tarball: ""
   fusion_commit: 4bd1018ad5a70ee113160536f969cdadd9f22918
   fusion_sha256: 37ea53b9b72b6431a4a2ee8b752804ad74f0f10071c416f856991814347d9c2d
