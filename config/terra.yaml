@@ -1,0 +1,39 @@
+# Flash-ready Terra image. One 64-bit Bookworm rootfs for Pi 4 and Pi 5.
+#
+# device.layer is terra64 (examples/terra/device): the 4K-page v8 kernel
+# baseline, plus the Pi 5 2712 kernel installed by the terra layer. A 16K
+# ext4 would not mount on Pi 4. Build with:
+#
+#   ./examples/terra/scripts/build-image.sh
+#
+# Lab Wi-Fi and SSH are off unless terra.lab_ssh / terra.lab_wifi_* are set.
+
+device:
+  layer: terra64
+  hostname: terra
+
+image:
+  layer: image-rpios
+  boot_part_size: 256M
+  root_part_size: 200%
+  name: terra-bookworm-arm64
+
+layer:
+  app: terra
+
+deploy:
+  compression: none
+
+terra:
+  source_ref: f08d0c15ebe2c585169d68448c42745d300cd9be
+  rover_version: 0.2.0
+  rover_url: https://github.com/Super-Yojan/Terra/releases/download/rover-v0.2.0/terra-rover-0.2.0-linux-arm64.tar.gz
+  rover_sha256: ""
+  rover_tarball: ""
+  fusion_commit: 4bd1018ad5a70ee113160536f969cdadd9f22918
+  fusion_sha256: 37ea53b9b72b6431a4a2ee8b752804ad74f0f10071c416f856991814347d9c2d
+  fusion_version: 1.14.0
+  fusion_driver_version: 1.1.0
+  lab_ssh: n
+  lab_wifi_ssid: ""
+  lab_wifi_psk: ""

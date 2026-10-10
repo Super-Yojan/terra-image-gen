@@ -1,0 +1,19 @@
+#!/bin/bash
+# Repeat the identity scrub after cleanup. Package scripts must not leave a
+# machine-id or SSH host keys in the image.
+set -euo pipefail
+
+root=${1:?cleanup hook requires the image root}
+: > "$root/etc/machine-id"
+chmod 0644 "$root/etc/machine-id"
+if [[ ! -L ${root}/var/lib/dbus/machine-id ]]; then
+   rm -f "$root/var/lib/dbus/machine-id"
+fi
+rm -f "$root"/etc/ssh/ssh_host_*
+rm -f "$root/var/lib/terra-rover/owner.json" \
+      "$root/var/lib/terra-rover/device-name.json"
+if [[ ${IGconf_terra_lab_ssh:-n} != y ]]; then
+   rm -f "$root/etc/systemd/system/multi-user.target.wants/ssh.service" \
+         "$root/etc/systemd/system/multi-user.target.wants/ssh.socket" \
+         "$root/etc/systemd/system/sockets.target.wants/ssh.socket"
+fi

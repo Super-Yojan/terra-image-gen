@@ -1,0 +1,95 @@
+#!/bin/bash
+# Runs after every layer's customize hooks. Scrub identity and secrets, enable
+# the Fusion HAT overlay, and apply optional lab-only Wi-Fi / SSH.
+set -euo pipefail
+
+root=${1:?customize hook requires the image root}
+cfg=$root/boot/firmware/config.txt
+[[ -f $cfg ]] || { echo "terra: missing $cfg" >&2; exit 1; }
+
+if ! grep -qx 'dtoverlay=sunfounder-fusionhat' "$cfg"; then
+   cat >> "$cfg" << 'EOF'
+
+# Terra Fusion HAT (pinned sunfounder/fusion-hat driver).
+# The vendor userspace audio/voice stack is not installed.
+dtparam=i2c_arm=on
+dtoverlay=sunfounder-fusionhat
+EOF
+fi
+
+# Empty machine-id makes systemd generate a unique one on first boot.
+# A missing file would be a transient id, so keep a zero-length file.
+mkdir -p "$root/etc"
+: > "$root/etc/machine-id"
+chmod 0644 "$root/etc/machine-id"
+if [[ -L $root/var/lib/dbus/machine-id ]]; then
+   :
+else
+   rm -f "$root/var/lib/dbus/machine-id"
+fi
+
+# Host keys from the openssh postinst must not ship. ssh-hostkeys-generate
+# fills them in on first boot when sshd is later enabled.
+rm -f "$root"/etc/ssh/ssh_host_*
+
+rm -f "$root/var/lib/terra-rover/owner.json" \
+      "$root/var/lib/terra-rover/device-name.json"
+
+# Placeholder hostname. terra-firstboot replaces it from the Pi serial.
+printf '%s\n' terra > "$root/etc/hostname"
+if [[ -f $root/etc/hosts ]]; then
+   grep -v '127.0.1.1' "$root/etc/hosts" > "$root/etc/hosts.terra" || true
+   printf '%s\n' '127.0.1.1 terra' >> "$root/etc/hosts.terra"
+   mv "$root/etc/hosts.terra" "$root/etc/hosts"
+else
+   printf '%s\n' '127.0.1.1 terra' > "$root/etc/hosts"
+fi
+
+if [[ ${IGconf_terra_lab_ssh:-n} != y ]]; then
+   rm -f "$root/etc/systemd/system/multi-user.target.wants/ssh.service" \
+         "$root/etc/systemd/system/multi-user.target.wants/ssh.socket" \
+         "$root/etc/systemd/system/sockets.target.wants/ssh.socket"
+fi
+
+ssid=${IGconf_terra_lab_wifi_ssid:-}
+psk=${IGconf_terra_lab_wifi_psk:-}
+if [[ -n $ssid || -n $psk ]]; then
+   [[ -n $ssid && -n $psk ]] || {
+      echo "terra: lab Wi-Fi needs both lab_wifi_ssid and lab_wifi_psk" >&2
+      exit 1
+   }
+   case "$ssid$psk" in
+      *[$'\n"\\']*)
+         echo "terra: lab Wi-Fi values cannot contain quotes, backslashes, or newlines" >&2
+         exit 1
+         ;;
+   esac
+   install -d -m 0755 "$root/etc/wpa_supplicant"
+   cat > "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" << EOF
+ctrl_interface=/run/wpa_supplicant
+update_config=0
+country=US
+network={
+	ssid="$ssid"
+	psk="$psk"
+	key_mgmt=WPA-PSK
+}
+EOF
+   chmod 0600 "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+   mkdir -p "$root/etc/systemd/system/multi-user.target.wants"
+   ln -sfn /lib/systemd/system/wpa_supplicant@.service \
+      "$root/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service"
+else
+   rm -f "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" \
+         "$root/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service"
+fi
+
+# The service command must keep Terra's safety defaults.
+unit=$root/etc/systemd/system/terra-rover.service
+[[ -f $unit ]] || { echo "terra: missing $unit" >&2; exit 1; }
+grep -q -- '--button-pairing' "$unit"
+if grep -q -- '--gate-file' "$unit"; then
+   echo "terra: terra-rover.service must not set --gate-file" >&2
+   exit 1
+fi
+grep -q '^TERRA_PWM_PORTS=$' "$root/etc/terra-rover/rover.env"

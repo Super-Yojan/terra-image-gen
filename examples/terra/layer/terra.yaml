@@ -1,0 +1,106 @@
+# METABEGIN
+# X-Env-Layer-Name: terra
+# X-Env-Layer-Version: 1.0.0
+# X-Env-Layer-Category: product
+# X-Env-Layer-Desc: Terra rover product layer. Installs the pinned Fusion HAT
+#  kernel driver (DKMS, image kernel headers, vendor overlay, I2C) and the
+#  terra-rover service. Does not install the vendor audio or voice stack,
+#  does not create an owner bond, and does not bake Wi-Fi or SSH credentials.
+# X-Env-Layer-Requires: bookworm-minbase,bluez
+# X-Env-Layer-RequiresProvider: rpi-device,systemd
+#
+# X-Env-VarPrefix: terra
+#
+# X-Env-Var-source_ref: f08d0c15ebe2c585169d68448c42745d300cd9be
+# X-Env-Var-source_ref-Desc: Super-Yojan/Terra commit the rover tarball was built
+#  from. Recorded in /etc/terra-image-release.
+# X-Env-Var-source_ref-Valid: regex:^[0-9a-f]{40}$
+# X-Env-Var-source_ref-Set: y
+#
+# X-Env-Var-rover_version: 0.2.0
+# X-Env-Var-rover_version-Desc: terra-rover release version embedded in the
+#  tarball name terra-rover-<version>-linux-arm64.tar.gz.
+# X-Env-Var-rover_version-Valid: regex:^[0-9]+\.[0-9]+\.[0-9]+$
+# X-Env-Var-rover_version-Set: y
+#
+# X-Env-Var-rover_url: https://github.com/Super-Yojan/Terra/releases/download/rover-v0.2.0/terra-rover-0.2.0-linux-arm64.tar.gz
+# X-Env-Var-rover_url-Desc: URL of the pinned terra-rover tarball. Ignored
+#  when rover_tarball is set.
+# X-Env-Var-rover_url-Valid: string-or-empty
+# X-Env-Var-rover_url-Set: y
+#
+# X-Env-Var-rover_sha256:
+# X-Env-Var-rover_sha256-Desc: sha256 of the terra-rover tarball. Required.
+#  The install hook refuses to continue when this is empty or does not match.
+# X-Env-Var-rover_sha256-Valid: string-or-empty
+# X-Env-Var-rover_sha256-Set: y
+#
+# X-Env-Var-rover_tarball:
+# X-Env-Var-rover_tarball-Desc: Absolute path to a local
+#  terra-rover tarball. When set, the URL is not downloaded. The sha256 is
+#  still required and checked.
+# X-Env-Var-rover_tarball-Valid: string-or-empty
+# X-Env-Var-rover_tarball-Set: y
+#
+# X-Env-Var-fusion_commit: 4bd1018ad5a70ee113160536f969cdadd9f22918
+# X-Env-Var-fusion_commit-Desc: Pinned sunfounder/fusion-hat commit (v1.14.0).
+# X-Env-Var-fusion_commit-Valid: regex:^[0-9a-f]{40}$
+# X-Env-Var-fusion_commit-Set: y
+#
+# X-Env-Var-fusion_sha256: 37ea53b9b72b6431a4a2ee8b752804ad74f0f10071c416f856991814347d9c2d
+# X-Env-Var-fusion_sha256-Desc: sha256 of the codeload tarball for fusion_commit.
+# X-Env-Var-fusion_sha256-Valid: regex:^[0-9a-f]{64}$
+# X-Env-Var-fusion_sha256-Set: y
+#
+# X-Env-Var-fusion_version: 1.14.0
+# X-Env-Var-fusion_version-Desc: Fusion HAT library version recorded in the
+#  image manifest. The kernel driver version is fusion_driver_version.
+# X-Env-Var-fusion_version-Valid: string
+# X-Env-Var-fusion_version-Set: y
+#
+# X-Env-Var-fusion_driver_version: 1.1.0
+# X-Env-Var-fusion_driver_version-Desc: DKMS package version of the Fusion HAT
+#  kernel module (PACKAGE_VERSION in the pinned driver).
+# X-Env-Var-fusion_driver_version-Valid: regex:^[0-9]+\.[0-9]+\.[0-9]+$
+# X-Env-Var-fusion_driver_version-Set: y
+#
+# X-Env-Var-lab_ssh: n
+# X-Env-Var-lab_ssh-Desc: When y, leave sshd enabled for a lab image. Default
+#  n removes the ssh.service enablement symlink. Host keys are never baked in.
+# X-Env-Var-lab_ssh-Valid: bool
+# X-Env-Var-lab_ssh-Set: y
+#
+# X-Env-Var-lab_wifi_ssid:
+# X-Env-Var-lab_wifi_ssid-Desc: Optional lab Wi-Fi SSID. Off unless both this
+#  and lab_wifi_psk are set. Production images must leave both empty.
+# X-Env-Var-lab_wifi_ssid-Valid: string-or-empty
+# X-Env-Var-lab_wifi_ssid-Set: y
+#
+# X-Env-Var-lab_wifi_psk:
+# X-Env-Var-lab_wifi_psk-Desc: Optional lab Wi-Fi PSK. Written only together
+#  with lab_wifi_ssid, mode 0600. Never set this for cards that leave the lab.
+# X-Env-Var-lab_wifi_psk-Valid: string-or-empty
+# X-Env-Var-lab_wifi_psk-Set: y
+# METAEND
+---
+mmdebstrap:
+  packages:
+    - dkms
+    - build-essential
+    - bc
+    - bison
+    - flex
+    - libssl-dev
+    - dwarves
+    - device-tree-compiler
+    - linux-headers-rpi-v8
+    - linux-headers-rpi-2712
+    - linux-image-rpi-2712
+    - i2c-tools
+    - cloud-guest-utils
+    - e2fsprogs
+    - wpasupplicant
+    - kmod
+    - dbus
+    - curl
+    - ca-certificates
