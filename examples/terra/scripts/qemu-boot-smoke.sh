@@ -13,27 +13,46 @@ command -v qemu-system-aarch64 >/dev/null 2>&1 || { echo "qemu-system-aarch64 is
 
 tmpdir=$(mktemp -d)
 cleanup() {
-   if [[ -n ${loop:-} ]]; then sudo losetup -d "$loop" 2>/dev/null || true; fi
+   if [[ -n ${loop:-} ]]; then
+      sudo partx --delete "$loop" 2>/dev/null || true
+      sudo losetup -d "$loop" 2>/dev/null || true
+   fi
    sudo umount "$tmpdir/boot" 2>/dev/null || true
    rm -rf "$tmpdir"
 }
 trap cleanup EXIT
 
 loop=$(sudo losetup --find --show --partscan "$image")
-for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -b ${loop}p1 ]] && break; sleep 0.2; done
-mkdir -p "$tmpdir/boot"
-sudo mount -o ro "${loop}p1" "$tmpdir/boot"
-kernel=
-for candidate in kernel8.img kernel_2712.img; do
-   if sudo test -f "$tmpdir/boot/$candidate"; then
-      sudo cp "$tmpdir/boot/$candidate" "$tmpdir/$candidate"
-      sudo chmod 0644 "$tmpdir/$candidate"
-      kernel=$tmpdir/$candidate
-      # Prefer the 4K v8 kernel under QEMU's virt machine.
-      [[ $candidate == kernel8.img ]] && break
-   fi
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+   [[ -b ${loop}p1 ]] && break
+   sudo partx --add "$loop" 2>/dev/null || true
+   sleep 0.2
 done
-sudo umount "$tmpdir/boot"
+[[ -b ${loop}p1 ]] || { echo "no boot partition on $loop" >&2; exit 1; }
+mkdir -p "$tmpdir/boot"
+kernel=
+if sudo mount -o ro "${loop}p1" "$tmpdir/boot" 2>/dev/null; then
+   for candidate in kernel8.img kernel_2712.img; do
+      if sudo test -f "$tmpdir/boot/$candidate"; then
+         sudo cp "$tmpdir/boot/$candidate" "$tmpdir/$candidate"
+         sudo chmod 0644 "$tmpdir/$candidate"
+         kernel=$tmpdir/$candidate
+         # Prefer the 4K v8 kernel under QEMU's virt machine.
+         [[ $candidate == kernel8.img ]] && break
+      fi
+   done
+   sudo umount "$tmpdir/boot"
+else
+   command -v mcopy >/dev/null 2>&1 || { echo "cannot mount vfat and mtools is not installed" >&2; exit 1; }
+   start=$(sudo partx -o START -g -n 1 "$loop")
+   fat="${image}@@${start}s"
+   for candidate in kernel8.img kernel_2712.img; do
+      if MTOOLS_SKIP_CHECK=1 mcopy -n -i "$fat" "::/$candidate" "$tmpdir/" 2>/dev/null; then
+         kernel=$tmpdir/$candidate
+         [[ $candidate == kernel8.img ]] && break
+      fi
+   done
+fi
 [[ -n $kernel ]] || { echo "no kernel8.img or kernel_2712.img on the boot partition" >&2; exit 1; }
 
 echo "qemu-boot: kernel $kernel" | tee "$log"

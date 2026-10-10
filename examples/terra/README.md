@@ -11,7 +11,7 @@ This tree is an rpi-image-gen source directory (`-S examples/terra`) plus `confi
 Host packages (Debian or Ubuntu, including amd64 with qemu-user):
 
 ```sh
-sudo apt-get install -y qemu-user-static binfmt-support bmap-tools xz-utils
+sudo apt-get install -y qemu-user-static binfmt-support bmap-tools xz-utils mtools
 sudo ./install_deps.sh
 ```
 

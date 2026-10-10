@@ -170,7 +170,8 @@ k2712=$(chroot "$root" dpkg-query -W -f '${Version}' linux-image-rpi-2712 2>/dev
 kv8=$(chroot "$root" dpkg-query -W -f '${Version}' linux-image-rpi-v8 2>/dev/null || true)
 h2712=$(chroot "$root" dpkg-query -W -f '${Version}' linux-headers-rpi-2712 2>/dev/null || true)
 hv8=$(chroot "$root" dpkg-query -W -f '${Version}' linux-headers-rpi-v8 2>/dev/null || true)
-gitrev=$(git -C "${IGTOP:-.}" rev-parse HEAD 2>/dev/null || echo unknown)
+# sudo builds trip git's safe.directory check when the repo is not root-owned.
+gitrev=$(git -c safe.directory='*' -C "${IGTOP:-.}" rev-parse HEAD 2>/dev/null || echo unknown)
 
 install -d -m 0755 "$root/etc"
 cat > "$root/etc/terra-image-release" << EOF

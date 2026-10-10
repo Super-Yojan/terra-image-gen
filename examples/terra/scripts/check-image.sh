@@ -9,6 +9,7 @@ root=
 skip_exec=0
 allow_lab=0
 cleanup_mount=0
+boot_mounted=0
 loop=
 
 usage() {
@@ -40,10 +41,11 @@ cleanup() {
       sudo umount "$root/dev" 2>/dev/null || true
       sudo umount "$root" 2>/dev/null || true
    fi
-   if [[ -n $bootfs && $cleanup_mount -eq 1 ]]; then
+   if [[ $boot_mounted -eq 1 && -n $bootfs ]]; then
       sudo umount "$bootfs" 2>/dev/null || true
    fi
    if [[ -n $loop ]]; then
+      sudo partx --delete "$loop" 2>/dev/null || true
       sudo losetup -d "$loop" 2>/dev/null || true
    fi
    if [[ -n $tmpdir ]]; then
@@ -64,9 +66,10 @@ if [[ -n $image ]]; then
          ;;
    esac
    loop=$(sudo losetup --find --show --partscan "$raw")
-   # Partition nodes can lag the ioctl.
+   # Some kernels do not create partition nodes from --partscan alone.
    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      [[ -b ${loop}p2 ]] && break
+      [[ -b ${loop}p1 && -b ${loop}p2 ]] && break
+      sudo partx --add "$loop" 2>/dev/null || true
       sleep 0.2
    done
    [[ -b ${loop}p1 && -b ${loop}p2 ]] || fail "expected boot and root partitions on $loop"
@@ -76,7 +79,20 @@ if [[ -n $image ]]; then
    bootfs=$tmpdir/boot
    mkdir -p "$root" "$bootfs"
    sudo mount -o ro "${loop}p2" "$root"
-   sudo mount -o ro "${loop}p1" "$bootfs"
+   if sudo mount -o ro "${loop}p1" "$bootfs" 2>/dev/null; then
+      boot_mounted=1
+   else
+      # This VM kernel has no vfat module. Read the FAT boot partition with
+      # mtools so the same checks run. CI hosts that can mount vfat use the
+      # mount path above.
+      command -v mtype >/dev/null 2>&1 || fail "cannot mount vfat and mtools is not installed"
+      start=$(sudo partx -o START -g -n 1 "$loop")
+      fat="${raw}@@${start}s"
+      MTOOLS_SKIP_CHECK=1 mtype -i "$fat" ::/config.txt > "$bootfs/config.txt"
+      mkdir -p "$bootfs/overlays"
+      MTOOLS_SKIP_CHECK=1 mcopy -n -i "$fat" ::/overlays/sunfounder-fusionhat.dtbo "$bootfs/overlays/"
+      echo "ok: boot partition read with mtools (vfat is not mountable here)"
+   fi
    cleanup_mount=1
 else
    bootfs=$root/boot/firmware
@@ -122,10 +138,20 @@ fi)
 ok "no owner bond or rover name"
 
 if [[ $allow_lab -eq 0 ]]; then
+   # Match credential files only. wpasupplicant also ships a D-Bus policy at
+   # /etc/dbus-1/system.d/wpa_supplicant.conf, which is not a network config.
    creds=$(if [[ $cleanup_mount -eq 1 ]]; then
-      sudo find "$root/etc" "$root/boot" -type f \( -name '*.nmconnection' -o -name 'wpa_supplicant*.conf' -o -name 'userconf*' \) -print 2>/dev/null || true
+      sudo find "$root/etc" "$root/boot" -type f \( \
+         -name '*.nmconnection' -o \
+         -path '*/wpa_supplicant/wpa_supplicant*.conf' -o \
+         -name 'userconf' -o -name 'userconf.txt' \
+      \) -print 2>/dev/null || true
    else
-      find "$root/etc" "$root/boot" -type f \( -name '*.nmconnection' -o -name 'wpa_supplicant*.conf' -o -name 'userconf*' \) -print 2>/dev/null || true
+      find "$root/etc" "$root/boot" -type f \( \
+         -name '*.nmconnection' -o \
+         -path '*/wpa_supplicant/wpa_supplicant*.conf' -o \
+         -name 'userconf' -o -name 'userconf.txt' \
+      \) -print 2>/dev/null || true
    fi)
    [[ -z $creds ]] || fail "Wi-Fi or user credentials baked in: $creds"
    if exists "$root/etc/shadow"; then
