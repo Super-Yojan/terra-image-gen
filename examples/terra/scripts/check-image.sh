@@ -33,11 +33,15 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 ok() { echo "ok: $*"; }
 
 tmpdir=
+bootfs=
 cleanup() {
    if [[ -n $root && $cleanup_mount -eq 1 ]]; then
       sudo umount "$root/proc" 2>/dev/null || true
       sudo umount "$root/dev" 2>/dev/null || true
       sudo umount "$root" 2>/dev/null || true
+   fi
+   if [[ -n $bootfs && $cleanup_mount -eq 1 ]]; then
+      sudo umount "$bootfs" 2>/dev/null || true
    fi
    if [[ -n $loop ]]; then
       sudo losetup -d "$loop" 2>/dev/null || true
@@ -65,13 +69,17 @@ if [[ -n $image ]]; then
       [[ -b ${loop}p2 ]] && break
       sleep 0.2
    done
-   [[ -b ${loop}p2 ]] || fail "no second partition on $loop"
+   [[ -b ${loop}p1 && -b ${loop}p2 ]] || fail "expected boot and root partitions on $loop"
    fstype=$(sudo blkid -o value -s TYPE "${loop}p2" || true)
    [[ $fstype == ext4 ]] || fail "root partition type is '${fstype:-unknown}', expected ext4"
    root=$tmpdir/root
-   mkdir -p "$root"
+   bootfs=$tmpdir/boot
+   mkdir -p "$root" "$bootfs"
    sudo mount -o ro "${loop}p2" "$root"
+   sudo mount -o ro "${loop}p1" "$bootfs"
    cleanup_mount=1
+else
+   bootfs=$root/boot/firmware
 fi
 
 [[ -d $root ]] || fail "rootfs not found: $root"
@@ -173,11 +181,18 @@ ok "ARM64 ELF"
 if [[ $skip_exec -eq 0 ]]; then
    if [[ $cleanup_mount -eq 1 ]]; then
       sudo mount -o remount,rw "$root"
+      sudo mkdir -p "$root/proc" "$root/dev" "$root/tmp"
+      sudo chmod 1777 "$root/tmp"
       sudo mount -t proc proc "$root/proc"
-      if [[ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 && -x /usr/bin/qemu-aarch64-static ]]; then
+      sudo mount --bind /dev "$root/dev"
+      # The onefile binary is AArch64. Copy the interpreter into the chroot so
+      # binfmt works even when the host registration does not use the F flag.
+      if [[ $(uname -m) != aarch64 && -x /usr/bin/qemu-aarch64-static ]]; then
          sudo cp /usr/bin/qemu-aarch64-static "$root/usr/bin/qemu-aarch64-static"
       fi
       sudo chroot "$root" /usr/local/bin/terra-rover --check-bundle
+      sudo umount "$root/dev" || true
+      sudo umount "$root/proc" || true
       sudo mount -o remount,ro "$root" || true
    else
       [[ $(id -u) -eq 0 ]] || fail "--root exec check needs root, or pass --skip-exec"
@@ -204,10 +219,13 @@ isdir "$root/usr/src/fusion_hat-1.1.0" || fail "DKMS source /usr/src/fusion_hat-
 isdir "$root/var/lib/dkms/fusion_hat" || fail "DKMS registration directory missing"
 ok "DKMS source and registration"
 
-cfg=$(readf "$root/boot/firmware/config.txt")
+# genimage places /boot/firmware on the FAT boot partition, so an image check
+# reads config.txt and the overlay from that partition. A --root fixture keeps
+# them under boot/firmware in the synthetic tree.
+cfg=$(readf "$bootfs/config.txt")
 grep -qx 'dtparam=i2c_arm=on' <<< "$cfg" || fail "I2C is not enabled in config.txt"
 grep -qx 'dtoverlay=sunfounder-fusionhat' <<< "$cfg" || fail "Fusion HAT overlay is not enabled in config.txt"
-exists "$root/boot/firmware/overlays/sunfounder-fusionhat.dtbo" || fail "overlay dtbo missing"
+exists "$bootfs/overlays/sunfounder-fusionhat.dtbo" || fail "overlay dtbo missing"
 ok "config.txt overlay and I2C"
 
 manifest=$(readf "$root/etc/terra-image-release")

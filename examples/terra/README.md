@@ -88,7 +88,7 @@ The script refuses the disk that holds `/` and refuses non-removable disks. `bma
 sudo ./examples/terra/scripts/check-image.sh --image work/deploy-*/terra-bookworm-arm64.img
 ```
 
-This mounts the rootfs and checks the binary (`terra-rover --check-bundle` under qemu-user), the enabled service, the account, the Fusion HAT module and overlay, and the absence of host keys, machine-id, an owner bond, and credentials.
+This mounts the root filesystem and the FAT boot partition. It checks the binary (`terra-rover --check-bundle` under qemu-user on a non-arm64 host), the enabled service, the account, the Fusion HAT module, `config.txt` and the overlay on the boot partition, and the absence of host keys, machine-id, an owner bond, and credentials.
 
 `scripts/test-check-fixture.sh` runs the same checker against a synthetic root so the negative cases stay covered without a full image build.
 

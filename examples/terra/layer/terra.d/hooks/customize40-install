@@ -72,9 +72,34 @@ cp -a "$cache/fusion-src/$top/LICENSE" "$src/LICENSE"
 # Record the commit next to the GPL sources retained in the image.
 printf '%s\n' "$fusion_commit" > "$src/FUSION_HAT_COMMIT"
 
-if ! mountpoint -q "$root/proc"; then
-   mount -t proc proc "$root/proc"
-fi
+# DKMS and the kernel build look at /proc, /sys, and /dev. Mount only what
+# mmdebstrap has not already mounted, and drop those mounts before returning
+# so the rootfs can be unmounted later.
+dkms_mounts=()
+mount_into() {
+   local dest=$1 kind=$2
+   mkdir -p "$dest"
+   if mountpoint -q "$dest"; then
+      return 0
+   fi
+   case $kind in
+      proc) mount -t proc proc "$dest" ;;
+      sysfs) mount -t sysfs sysfs "$dest" ;;
+      dev) mount --bind /dev "$dest" ;;
+   esac || return 1
+   dkms_mounts+=("$dest")
+}
+cleanup_dkms_mounts() {
+   local i
+   for ((i=${#dkms_mounts[@]}-1; i>=0; i--)); do
+      umount "${dkms_mounts[i]}" || true
+   done
+}
+trap cleanup_dkms_mounts EXIT
+mount_into "$root/proc" proc
+mount_into "$root/sys" sysfs || echo "terra: warning: could not mount sysfs in the image" >&2
+mount_into "$root/dev" dev || echo "terra: warning: could not bind-mount /dev in the image" >&2
+mkdir -p "$root/tmp"
 
 cat > "$root/tmp/terra-dkms.sh" << EOF
 #!/bin/bash

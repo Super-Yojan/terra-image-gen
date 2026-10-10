@@ -55,7 +55,9 @@ if grep -E -q 'Start request repeated too quickly|terra-rover.service: Failed wi
    echo "qemu-boot: FAIL terra-rover crash-looped" | tee -a "$log"
    exit 1
 fi
-if grep -E -q 'Enrollment unavailable|Started Terra owner-only|terra-rover.service' "$log"; then
+# A mention of the unit name is not success. bluetooth.service is Required,
+# so a missing controller can stop the unit from ever starting.
+if grep -E -q 'Enrollment unavailable|Started Terra owner-only' "$log"; then
    echo "qemu-boot: PASS systemd reached terra-rover and it stayed up without the HAT" | tee -a "$log"
    exit 0
 fi

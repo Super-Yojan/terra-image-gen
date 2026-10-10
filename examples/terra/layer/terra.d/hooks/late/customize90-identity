@@ -17,6 +17,17 @@ dtoverlay=sunfounder-fusionhat
 EOF
 fi
 
+# Rebuild the overlay here if an earlier step replaced /boot/firmware.
+overlay=$root/boot/firmware/overlays/sunfounder-fusionhat.dtbo
+dts=$root/usr/src/fusion_hat-${IGconf_terra_fusion_driver_version:?}/sunfounder-fusionhat-overlay.dts
+if [[ ! -f $overlay ]]; then
+   [[ -f $dts ]] || { echo "terra: missing overlay source $dts" >&2; exit 1; }
+   mkdir -p "$root/boot/firmware/overlays"
+   chroot "$root" dtc -@ -I dts -O dtb \
+      -o /boot/firmware/overlays/sunfounder-fusionhat.dtbo \
+      "/usr/src/fusion_hat-${IGconf_terra_fusion_driver_version}/sunfounder-fusionhat-overlay.dts"
+fi
+
 # Empty machine-id makes systemd generate a unique one on first boot.
 # A missing file would be a transient id, so keep a zero-length file.
 mkdir -p "$root/etc"
