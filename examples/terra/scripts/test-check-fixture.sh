@@ -10,13 +10,15 @@ trap 'rm -rf "$tmp"' EXIT
 
 good=$tmp/good
 mkdir -p \
-   "$good/etc/ssh" "$good/etc/systemd/system/multi-user.target.wants" \
+   "$good/etc/ssh/sshd_config.d" "$good/etc/systemd/system/multi-user.target.wants" \
    "$good/etc/systemd/system/sysinit.target.wants" \
+   "$good/etc/modules-load.d" "$good/etc/terra-image" \
    "$good/etc/terra-rover" "$good/var/lib/terra-rover" \
-   "$good/usr/local/bin" "$good/usr/src/fusion_hat-1.1.0" \
+   "$good/usr/local/bin" "$good/usr/local/sbin" "$good/usr/src/fusion_hat-1.1.0" \
    "$good/var/lib/dkms/fusion_hat/1.1.0" \
    "$good/lib/modules/6.6.0-rpi-v8/extra" \
    "$good/lib/modules/6.12.0-rpi-2712/updates/dkms" \
+   "$good/lib/systemd/system" \
    "$good/boot/firmware/overlays" \
    "$good/home/pi"
 
@@ -32,7 +34,7 @@ ln -s ../terra-rover.service "$good/etc/systemd/system/multi-user.target.wants/t
 ln -s ../terra-firstboot.service "$good/etc/systemd/system/sysinit.target.wants/terra-firstboot.service"
 printf '%s\n' 'terra-rover:x:990:990::/var/lib/terra-rover:/usr/sbin/nologin' > "$good/etc/passwd"
 printf '%s\n' 'terra-rover:x:990:' 'i2c:x:991:terra-rover' 'bluetooth:x:992:terra-rover' > "$good/etc/group"
-printf '%s\n' 'root:*:1:0:99999:7:::' 'terra-rover:!:1:0:99999:7:::' 'pi:!:1:0:99999:7:::' > "$good/etc/shadow"
+printf '%s\n' 'root:*:1:0:99999:7:::' 'terra-rover:!:1:0:99999:7:::' 'pi:*:1:0:99999:7:::' > "$good/etc/shadow"
 : > "$good/home/pi/.placeholder"
 install -d -m 0700 "$good/var/lib/terra-rover"
 # Ownership is whatever the fixture user is; rewrite passwd to match.
@@ -47,7 +49,22 @@ printf '\177ELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00'
 : > "$good/lib/modules/6.6.0-rpi-v8/extra/fusion_hat.ko"
 : > "$good/lib/modules/6.12.0-rpi-2712/updates/dkms/fusion_hat.ko.xz"
 : > "$good/boot/firmware/overlays/sunfounder-fusionhat.dtbo"
-printf '%s\n' 'dtparam=i2c_arm=on' 'dtoverlay=sunfounder-fusionhat' > "$good/boot/firmware/config.txt"
+overlay=$here/../layer/terra.d/customize.overlay
+cp "$overlay/etc/terra-image/fusion-hat.config" "$good/etc/terra-image/fusion-hat.config"
+cp "$overlay/etc/modules-load.d/terra-i2c.conf" "$good/etc/modules-load.d/terra-i2c.conf"
+cp "$overlay/etc/ssh/sshd_config.d/99-terra-access.conf" "$good/etc/ssh/sshd_config.d/99-terra-access.conf"
+cp "$overlay/usr/local/sbin/terra-boot-provision" "$good/usr/local/sbin/terra-boot-provision"
+: > "$good/lib/systemd/system/ssh.service"
+ln -s ../../../../lib/systemd/system/ssh.service \
+   "$good/etc/systemd/system/multi-user.target.wants/ssh.service"
+cat > "$good/boot/firmware/config.txt" << 'EOF'
+#dtparam=i2c_arm=on
+dtparam=i2c_arm=on
+dtparam=i2s=on
+dtparam=spi=on
+dtparam=audio=off
+dtoverlay=sunfounder-fusionhat
+EOF
 cat > "$good/etc/terra-image-release" << 'EOF'
 TERRA_FUSION_COMMIT=4bd1018ad5a70ee113160536f969cdadd9f22918
 TERRA_FUSION_SHA256=37ea53b9b72b6431a4a2ee8b752804ad74f0f10071c416f856991814347d9c2d

@@ -1,12 +1,32 @@
 #!/bin/sh
-# Per-card identity and root filesystem expansion. Runs once. Does not create
-# an owner bond, a rover BLE name, Wi-Fi credentials, or SSH host keys.
+# Per-card identity, headless access from the FAT boot partition, and root
+# filesystem expansion. Runs once. Does not create an owner bond, a rover
+# BLE name, or SSH host keys. Wi-Fi and authorized_keys are installed only
+# from files the operator put on the boot partition.
 set -eu
 
 stamp=/var/lib/terra-image/firstboot-done
 [ -e "$stamp" ] && exit 0
 
 log() { echo "terra-firstboot: $*" >&2; }
+
+# sshd is already enabled in the image. This copies authorized_keys, Wi-Fi,
+# and custom.toml off the boot partition, and repairs Fusion HAT config.txt
+# lines if a flasher rewrote that file.
+/usr/local/sbin/terra-boot-provision
+
+if [ -e /var/lib/terra-image/fusion-config-changed ]; then
+    if [ ! -e /var/lib/terra-image/fusion-config-rebooted ]; then
+        mkdir -p /var/lib/terra-image
+        : > /var/lib/terra-image/fusion-config-rebooted
+        rm -f /var/lib/terra-image/fusion-config-changed
+        sync
+        log "rebooting so the Fusion HAT overlay is loaded"
+        reboot
+        exit 0
+    fi
+    rm -f /var/lib/terra-image/fusion-config-changed
+fi
 
 serial=
 if [ -r /sys/firmware/devicetree/base/serial-number ]; then

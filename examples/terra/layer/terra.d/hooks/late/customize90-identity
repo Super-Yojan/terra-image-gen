@@ -7,16 +7,6 @@ root=${1:?customize hook requires the image root}
 cfg=$root/boot/firmware/config.txt
 [[ -f $cfg ]] || { echo "terra: missing $cfg" >&2; exit 1; }
 
-if ! grep -qx 'dtoverlay=sunfounder-fusionhat' "$cfg"; then
-   cat >> "$cfg" << 'EOF'
-
-# Terra Fusion HAT (pinned sunfounder/fusion-hat driver).
-# The vendor userspace audio/voice stack is not installed.
-dtparam=i2c_arm=on
-dtoverlay=sunfounder-fusionhat
-EOF
-fi
-
 # Rebuild the overlay here if an earlier step replaced /boot/firmware.
 overlay=$root/boot/firmware/overlays/sunfounder-fusionhat.dtbo
 dts=$root/usr/src/fusion_hat-${IGconf_terra_fusion_driver_version:?}/sunfounder-fusionhat-overlay.dts
@@ -27,6 +17,17 @@ if [[ ! -f $overlay ]]; then
       -o /boot/firmware/overlays/sunfounder-fusionhat.dtbo \
       "/usr/src/fusion_hat-${IGconf_terra_fusion_driver_version}/sunfounder-fusionhat-overlay.dts"
 fi
+
+# Fusion HAT config.txt lines, sshd, and an unlocked key-only pi account.
+# Lab images can still start with sshd off; the boot partition can turn it on.
+if [[ ${IGconf_terra_lab_ssh:-y} == n ]]; then
+   export TERRA_SSH_DEFAULT=n
+else
+   export TERRA_SSH_DEFAULT=y
+fi
+TERRA_ROOT=$root TERRA_BOOT=$root/boot/firmware \
+   "$root/usr/local/sbin/terra-boot-provision"
+unset TERRA_ROOT TERRA_BOOT TERRA_SSH_DEFAULT
 
 # Empty machine-id makes systemd generate a unique one on first boot.
 # A missing file would be a transient id, so keep a zero-length file.
@@ -40,7 +41,7 @@ else
 fi
 
 # Host keys from the openssh postinst must not ship. ssh-hostkeys-generate
-# fills them in on first boot when sshd is later enabled.
+# fills them in on first boot before sshd accepts connections.
 rm -f "$root"/etc/ssh/ssh_host_*
 
 rm -f "$root/var/lib/terra-rover/owner.json" \
@@ -56,7 +57,7 @@ else
    printf '%s\n' '127.0.1.1 terra' > "$root/etc/hosts"
 fi
 
-if [[ ${IGconf_terra_lab_ssh:-n} != y ]]; then
+if [[ ${IGconf_terra_lab_ssh:-y} == n ]]; then
    rm -f "$root/etc/systemd/system/multi-user.target.wants/ssh.service" \
          "$root/etc/systemd/system/multi-user.target.wants/ssh.socket" \
          "$root/etc/systemd/system/sockets.target.wants/ssh.socket"

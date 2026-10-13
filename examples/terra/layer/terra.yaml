@@ -3,9 +3,11 @@
 # X-Env-Layer-Version: 1.0.0
 # X-Env-Layer-Category: product
 # X-Env-Layer-Desc: Terra rover product layer. Installs the pinned Fusion HAT
-#  kernel driver (DKMS, image kernel headers, vendor overlay, I2C) and the
-#  terra-rover service. Does not install the vendor audio or voice stack,
-#  does not create an owner bond, and does not bake Wi-Fi or SSH credentials.
+#  kernel driver (DKMS, image kernel headers, vendor overlay, I2C, SPI, I2S)
+#  and the terra-rover service. Does not install the vendor audio or voice
+#  stack, does not create an owner bond, and does not bake Wi-Fi, passwords,
+#  or SSH keys. sshd is enabled so a key dropped on the boot partition can
+#  log in.
 # X-Env-Layer-Requires: bookworm-minbase,bluez
 # X-Env-Layer-RequiresProvider: rpi-device,systemd
 #
@@ -72,9 +74,11 @@
 # X-Env-Var-pwm_ports-Valid: list:P0,P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11
 # X-Env-Var-pwm_ports-Set: y
 #
-# X-Env-Var-lab_ssh: n
-# X-Env-Var-lab_ssh-Desc: When y, leave sshd enabled for a lab image. Default
-#  n removes the ssh.service enablement symlink. Host keys are never baked in.
+# X-Env-Var-lab_ssh: y
+# X-Env-Var-lab_ssh-Desc: When y (the default), sshd is enabled. No password
+#  and no authorized_keys are baked in. Set n to ship sshd disabled; an empty
+#  ssh file on the boot partition still turns it on at first boot. Host keys
+#  are never baked in.
 # X-Env-Var-lab_ssh-Valid: bool
 # X-Env-Var-lab_ssh-Set: y
 #
@@ -108,6 +112,7 @@ mmdebstrap:
     - cloud-guest-utils
     - e2fsprogs
     - wpasupplicant
+    - iw
     - kmod
     - dbus
     - curl

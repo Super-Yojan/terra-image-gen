@@ -38,24 +38,96 @@ Outputs (names follow the artefact version directory):
 ## What the image contains
 
 - Bookworm arm64, systemd, BlueZ, D-Bus.
-- Fusion HAT driver from sunfounder/fusion-hat commit `4bd1018ad5a70ee113160536f969cdadd9f22918` (library 1.14.0, driver DKMS 1.1.0). The codeload archive hash is checked. DKMS plus `linux-headers-rpi-v8` and `linux-headers-rpi-2712` are installed so a later kernel update can rebuild the module. The overlay `sunfounder-fusionhat` and `dtparam=i2c_arm=on` are enabled.
+- Fusion HAT driver from sunfounder/fusion-hat commit `4bd1018ad5a70ee113160536f969cdadd9f22918` (library 1.14.0, driver DKMS 1.1.0). The codeload archive hash is checked. DKMS plus `linux-headers-rpi-v8` and `linux-headers-rpi-2712` are installed so a later kernel update can rebuild the module. `/boot/firmware/config.txt` ends with the interfaces the pinned installer and the HAT docs require:
+
+  ```
+  dtparam=i2c_arm=on
+  dtparam=i2s=on
+  dtparam=spi=on
+  dtparam=audio=off
+  dtoverlay=sunfounder-fusionhat
+  ```
+
+  The installer itself only appends `dtoverlay=sunfounder-fusionhat`. `fusion_hat` enables I2C with `raspi-config nonint do_i2c 0`, which is `dtparam=i2c_arm=on` plus the `i2c-dev` module. The HAT's SPI header and I2S speaker/mic are the other two `dtparam` lines (they ship commented out in the Raspberry Pi template). `dtparam=audio=off` turns off the Pi's PWM analog audio so it does not claim the sound node the overlay replaces. HAT PWM connectors are the MCU at I2C `0x17`, not a Pi `pwm` overlay.
 - The vendor audio/voice userspace stack is not installed. The kernel module still includes the vendor speaker driver, because that is part of the pinned driver and the HAT probe path.
 - `terra-rover` from `install.sh --root`, user `terra-rover` in groups `i2c` and `bluetooth`, `/var/lib/terra-rover` mode 0700 owned by that user, `terra-rover.service` enabled.
 - Safety defaults from Terra: button pairing, no `--gate-file`, battery cutoff left external. Pairing does not arm. `TERRA_PWM_PORTS` defaults to `P0,P1,P2,P3,P4,P5` (`terra.pwm_ports`). P4 and P5 are also motor M3's pins, so one layout cannot use M3 together with P4 or P5.
 
 ## First boot
 
-`terra-firstboot.service` sets the hostname to `terra-` plus the last six hex digits of the Pi serial (or a random suffix when no serial exists) and grows the root filesystem to the card. systemd generates `machine-id` because the file ships empty. SSH host keys are absent; `ssh-hostkeys-generate.service` creates them if sshd is turned on later. `terra-rover` generates `terra-XXXXXX` itself the first time it can write `/var/lib/terra-rover/device-name.json`. That file is not in the image.
+`terra-firstboot.service` copies headless-access files off the FAT boot partition, sets the hostname to `terra-` plus the last six hex digits of the Pi serial (or a random suffix when no serial exists), and grows the root filesystem to the card. systemd generates `machine-id` because the file ships empty. SSH host keys are absent from the image; `ssh-hostkeys-generate.service` creates a new set before sshd listens. `terra-rover` generates `terra-XXXXXX` itself the first time it can write `/var/lib/terra-rover/device-name.json`. That file is not in the image.
 
-sshd is disabled. The locked `pi` account is the rpi-image-gen default and has no password.
+sshd is enabled. The `pi` account has no password (`*` in `/etc/shadow`, not a lock), so password login is refused and a public key works. `pi` can `sudo` without a password, because there is no password to type. Nothing in the image is a shared default password. If a flasher rewrote `config.txt` and dropped the Fusion HAT lines, first boot puts them back and reboots once.
 
-### Lab Wi-Fi or SSH
+The USR button only opens `terra-rover`'s pairing window. sshd does not wait on that button, on Bluetooth, or on `terra-rover.service`. Holding the button is not required to recover the Pi over SSH.
 
-Off unless you ask. These values are baked into that one image, so do not use them for cards that leave the lab. Wi-Fi provisioning from the phone is Terra issue 31, not this image.
+### Log in on a new card
+
+1. Flash `terra-bookworm-arm64.img.xz` with `flash-cards.sh` or Raspberry Pi Imager. Imager's own customisation is optional; the steps below work after any raw write.
+2. Put the card back in the computer you flashed from. Open the small FAT partition (the one that contains `config.txt`).
+3. Copy your SSH public key into a file named `authorized_keys` on that partition, one key per line. From the machine you will connect from:
+
+   ```sh
+   cp ~/.ssh/id_ed25519.pub /path/to/boot/authorized_keys
+   ```
+
+   `authorized_keys.txt` and `terra/authorized_keys` are accepted too. Windows can add a `.txt` suffix; the `.txt` name is the one to use in that case.
+4. Eject the card, boot the Pi, and connect it with an Ethernet cable (DHCP is already on) or with the Wi-Fi file from the next section. sshd is already enabled. An empty file named `ssh` (or `ssh.txt`) on the FAT partition is accepted as the usual Raspberry Pi switch, and it is optional on this image.
+5. Find the address. The hostname is `terra-` plus the last six hex digits of the Pi serial. On a network that resolves it:
+
+   ```sh
+   ssh pi@terra-xxxxxx.local
+   ```
+
+   Otherwise use the DHCP lease from the router. The first connection asks you to accept a new host key. That key was generated on the Pi; it is not in the image.
+
+First boot deletes `authorized_keys`, `wpa_supplicant.conf`, and `custom.toml` from the FAT partition after copying them, so the PSK does not stay on the world-readable partition.
+
+### Wi-Fi from the boot partition
+
+On the same FAT partition, either drop a `wpa_supplicant.conf`:
+
+```
+country=US
+ctrl_interface=/run/wpa_supplicant
+update_config=0
+network={
+	ssid="your-ssid"
+	psk="your-passphrase"
+	key_mgmt=WPA-PSK
+}
+```
+
+or a Raspberry Pi Imager `custom.toml` (also accepted as `rpi-preseed.toml`):
+
+```toml
+config_version = "1.0"
+
+[ssh]
+enabled = true
+password_authentication = false
+authorized_keys = [
+  "ssh-ed25519 AAAA... you@laptop",
+]
+
+[wlan]
+ssid = "your-ssid"
+password = "your-passphrase"
+password_encrypted = false
+hidden = false
+country = "US"
+```
+
+Set `country` to the regulatory country of the network. A `[user]` password in that file is applied when you put one there. Leave it out to keep the account key-only. `password_authentication = true` is honored only together with a password in the same file. `ssh_import_id` is not fetched. A cloud-init `user-data` whose first line is `#cloud-config` can also supply `ssh_authorized_keys`; cloud-init itself is not installed.
+
+Imager's OS customisation writes one of these files (or a one-shot `firstrun.sh`). Both the file copy and Imager customisation are supported. Do not bake a Wi-Fi PSK into the image you publish.
+
+### Lab images
+
+A lab build can still bake a key or a Wi-Fi PSK. Those values are on every card from that build, so do not use them for cards that leave the lab. Wi-Fi provisioning from the phone is Terra issue 31, not this image. `IGconf_terra_lab_ssh=n` ships sshd disabled; the `ssh` file on the FAT partition turns it back on.
 
 ```sh
 ./rpi-image-gen build -S examples/terra -c config/terra.yaml -- \
-  IGconf_terra_lab_ssh=y \
   IGconf_ssh_pubkey_user1="$(cat ~/.ssh/id_ed25519.pub)" \
   IGconf_terra_lab_wifi_ssid=lab \
   IGconf_terra_lab_wifi_psk=lab-password \
@@ -81,7 +153,7 @@ The script refuses the disk that holds `/` and refuses non-removable disks. `bma
 sudo ./examples/terra/scripts/check-image.sh --image work/deploy-*/terra-bookworm-arm64.img
 ```
 
-This mounts the root filesystem and the FAT boot partition. It checks the binary (`terra-rover --check-bundle` under qemu-user on a non-arm64 host), the enabled service, the account, the Fusion HAT module, `config.txt` and the overlay on the boot partition, and the absence of host keys, machine-id, an owner bond, and credentials.
+This mounts the root filesystem and the FAT boot partition. It checks the binary (`terra-rover --check-bundle` under qemu-user on a non-arm64 host), the enabled service, the account, the Fusion HAT module, the Fusion HAT `config.txt` lines and the overlay on the boot partition, that sshd is enabled with password authentication off, and the absence of host keys, machine-id, an owner bond, and credentials.
 
 `scripts/test-check-fixture.sh` runs the same checker against a synthetic root so the negative cases stay covered without a full image build.
 

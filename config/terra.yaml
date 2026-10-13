@@ -6,11 +6,16 @@
 #
 #   ./examples/terra/scripts/build-image.sh
 #
-# Lab Wi-Fi and SSH are off unless terra.lab_ssh / terra.lab_wifi_* are set.
+# sshd is enabled. No password, authorized_keys, or Wi-Fi PSK is baked in.
+# Put a public key on the FAT boot partition. See examples/terra/README.md.
+# Set terra.lab_ssh to n to ship sshd disabled. Lab Wi-Fi stays off unless
+# both terra.lab_wifi_ssid and terra.lab_wifi_psk are set.
 
 device:
   layer: terra64
   hostname: terra
+  # Key login has no password to type, so sudo cannot ask for one.
+  user1sudo: nopasswd
 
 image:
   layer: image-rpios
@@ -35,6 +40,6 @@ terra:
   fusion_version: 1.14.0
   fusion_driver_version: 1.1.0
   pwm_ports: P0,P1,P2,P3,P4,P5
-  lab_ssh: n
+  lab_ssh: y
   lab_wifi_ssid: ""
   lab_wifi_psk: ""

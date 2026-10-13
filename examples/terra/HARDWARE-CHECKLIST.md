@@ -16,11 +16,12 @@ Run this on a Pi 4 and a Pi 5, each with a Fusion HAT, an external battery cutof
 - [ ] `findmnt -no SIZE /` is larger than the image's root partition (filesystem expanded).
 - [ ] `cat /etc/terra-image-release` matches the manifest published with the image.
 - [ ] `systemctl is-enabled terra-rover.service` is `enabled`.
-- [ ] `systemctl is-active ssh` is inactive. There is no Wi-Fi connection configured.
+- [ ] `systemctl is-active ssh` is `active`. `pi` has no password. Login with the public key from the boot partition works over Ethernet, and `sudo` does not ask for a password. The USR button is not required for that login.
+- [ ] With no `authorized_keys` and no `custom.toml` on the boot partition, sshd still runs and refuses password login.
 
 ## Fusion HAT
 
-- [ ] `dtoverlay=sunfounder-fusionhat` and `dtparam=i2c_arm=on` are present in `/boot/firmware/config.txt`.
+- [ ] `/boot/firmware/config.txt` contains `dtparam=i2c_arm=on`, `dtparam=i2s=on`, `dtparam=spi=on`, `dtparam=audio=off`, and exactly one `dtoverlay=sunfounder-fusionhat`.
 - [ ] `/sys/class/fusion_hat/fusion_hat/pwm` exists after boot.
 - [ ] `fusion_hat` is the DKMS module for the running kernel (`dkms status` and `modinfo fusion_hat`).
 - [ ] User `terra-rover` can read the button attribute and write a PWM attribute. Confirm with the HAT's own sysfs, then set the output back to a safe disabled state before leaving the shell.

@@ -122,12 +122,19 @@ if exists "$root/etc/ssh"; then
 fi
 ok "no SSH host keys"
 
-if [[ $allow_lab -eq 0 ]]; then
-   if exists "$root/etc/systemd/system/multi-user.target.wants/ssh.service"; then
-      fail "sshd is enabled (lab SSH must stay off by default)"
-   fi
-   ok "sshd disabled"
+if exists "$root/etc/systemd/system/multi-user.target.wants/ssh.service"; then
+   ok "sshd enabled"
+else
+   fail "sshd is not enabled"
 fi
+if exists "$root/etc/ssh/sshd_config.d/99-terra-access.conf"; then
+   access=$(readf "$root/etc/ssh/sshd_config.d/99-terra-access.conf")
+   grep -qx 'PasswordAuthentication no' <<< "$access" || fail "password authentication is not disabled"
+   grep -qx 'PubkeyAuthentication yes' <<< "$access" || fail "public-key authentication is not enabled"
+else
+   fail "missing sshd drop-in 99-terra-access.conf"
+fi
+ok "public-key SSH, password authentication off"
 
 owner_hits=$(if [[ $cleanup_mount -eq 1 ]]; then
    sudo find "$root/var/lib/terra-rover" "$root/etc/terra-rover" \( -iname '*owner*' -o -name 'device-name.json' \) -print 2>/dev/null || true
@@ -157,6 +164,10 @@ if [[ $allow_lab -eq 0 ]]; then
    if exists "$root/etc/shadow"; then
       hashed=$(readf "$root/etc/shadow" | awk -F: '$2 ~ /^\$/ { print $1 }')
       [[ -z $hashed ]] || fail "password hashes in /etc/shadow: $hashed"
+      pi_pw=$(readf "$root/etc/shadow" | awk -F: '$1=="pi" { print $2 }')
+      [[ $pi_pw == '*' ]] || fail "pi shadow password is '$pi_pw' (want * so public keys work and no password is set)"
+   else
+      fail "missing /etc/shadow"
    fi
    keys=$(if [[ $cleanup_mount -eq 1 ]]; then
       sudo find "$root/home" "$root/root" "$root/etc" -name 'authorized_keys' -size +0c -print 2>/dev/null || true
@@ -249,10 +260,27 @@ ok "DKMS source and registration"
 # reads config.txt and the overlay from that partition. A --root fixture keeps
 # them under boot/firmware in the synthetic tree.
 cfg=$(readf "$bootfs/config.txt")
-grep -qx 'dtparam=i2c_arm=on' <<< "$cfg" || fail "I2C is not enabled in config.txt"
-grep -qx 'dtoverlay=sunfounder-fusionhat' <<< "$cfg" || fail "Fusion HAT overlay is not enabled in config.txt"
+snippet=$(readf "$root/etc/terra-image/fusion-hat.config")
+while IFS= read -r line || [[ -n $line ]]; do
+   [[ -n $line ]] || continue
+   grep -qx "$line" <<< "$cfg" || fail "config.txt is missing Fusion HAT line: $line"
+done <<< "$snippet"
+grep -qx 'dtparam=audio=on' <<< "$cfg" && fail "dtparam=audio=on is still active"
+[[ $(grep -cx 'dtoverlay=sunfounder-fusionhat' <<< "$cfg") -eq 1 ]] || fail "dtoverlay=sunfounder-fusionhat must appear once"
 exists "$bootfs/overlays/sunfounder-fusionhat.dtbo" || fail "overlay dtbo missing"
-ok "config.txt overlay and I2C"
+ok "config.txt Fusion HAT interfaces and overlay"
+
+i2cmod=$(readf "$root/etc/modules-load.d/terra-i2c.conf")
+grep -qx 'i2c-dev' <<< "$i2cmod" || fail "i2c-dev is not loaded"
+ok "i2c-dev module"
+
+provision=$root/usr/local/sbin/terra-boot-provision
+exists "$provision" || fail "terra-boot-provision missing"
+prov=$(readf "$provision")
+grep -q 'custom.toml' <<< "$prov" || fail "boot provisioner does not read custom.toml"
+grep -q 'authorized_keys' <<< "$prov" || fail "boot provisioner does not install authorized_keys"
+grep -q 'wpa_supplicant.conf' <<< "$prov" || fail "boot provisioner does not install wpa_supplicant.conf"
+ok "headless boot-partition provisioner"
 
 manifest=$(readf "$root/etc/terra-image-release")
 grep -q '^TERRA_FUSION_COMMIT=4bd1018ad5a70ee113160536f969cdadd9f22918$' <<< "$manifest" || fail "manifest fusion commit"
