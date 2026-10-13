@@ -34,6 +34,7 @@ terra:
   fusion_sha256: 37ea53b9b72b6431a4a2ee8b752804ad74f0f10071c416f856991814347d9c2d
   fusion_version: 1.14.0
   fusion_driver_version: 1.1.0
+  pwm_ports: P0,P1,P2,P3,P4,P5
   lab_ssh: n
   lab_wifi_ssid: ""
   lab_wifi_psk: ""

@@ -41,7 +41,7 @@ Outputs (names follow the artefact version directory):
 - Fusion HAT driver from sunfounder/fusion-hat commit `4bd1018ad5a70ee113160536f969cdadd9f22918` (library 1.14.0, driver DKMS 1.1.0). The codeload archive hash is checked. DKMS plus `linux-headers-rpi-v8` and `linux-headers-rpi-2712` are installed so a later kernel update can rebuild the module. The overlay `sunfounder-fusionhat` and `dtparam=i2c_arm=on` are enabled.
 - The vendor audio/voice userspace stack is not installed. The kernel module still includes the vendor speaker driver, because that is part of the pinned driver and the HAT probe path.
 - `terra-rover` from `install.sh --root`, user `terra-rover` in groups `i2c` and `bluetooth`, `/var/lib/terra-rover` mode 0700 owned by that user, `terra-rover.service` enabled.
-- Safety defaults from Terra: button pairing, `TERRA_PWM_PORTS` empty, no `--gate-file`, battery cutoff left external. Pairing does not arm.
+- Safety defaults from Terra: button pairing, no `--gate-file`, battery cutoff left external. Pairing does not arm. `TERRA_PWM_PORTS` defaults to `P0,P1,P2,P3,P4,P5` (`terra.pwm_ports`). P4 and P5 are also motor M3's pins, so one layout cannot use M3 together with P4 or P5.
 
 ## First boot
 

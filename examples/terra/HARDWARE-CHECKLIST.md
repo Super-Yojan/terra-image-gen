@@ -29,6 +29,7 @@ Run this on a Pi 4 and a Pi 5, each with a Fusion HAT, an external battery cutof
 ## terra-rover
 
 - [ ] `terra-rover --check-bundle` prints the pinned bless, bleak, dbus-next, and fusion_hat versions.
+- [ ] `/etc/terra-rover/rover.env` contains `TERRA_PWM_PORTS=P0,P1,P2,P3,P4,P5`.
 - [ ] The service is running and waiting. It has not created `/var/lib/terra-rover/owner.json`.
 - [ ] Holding the USR button for three seconds blinks the LED slowly and opens the pairing window. Releasing without a phone does not arm anything.
 - [ ] `/var/lib/terra-rover/device-name.json` appears only after the service has run, and the name differs across cards.

@@ -65,6 +65,13 @@
 # X-Env-Var-fusion_driver_version-Valid: regex:^[0-9]+\.[0-9]+\.[0-9]+$
 # X-Env-Var-fusion_driver_version-Set: y
 #
+# X-Env-Var-pwm_ports: P0,P1,P2,P3,P4,P5
+# X-Env-Var-pwm_ports-Desc: Comma-separated Fusion HAT PWM connectors written
+#  to TERRA_PWM_PORTS. These are the ports terra-rover will advertise. The
+#  default is P0 through P5. Pairing still does not arm.
+# X-Env-Var-pwm_ports-Valid: list:P0,P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11
+# X-Env-Var-pwm_ports-Set: y
+#
 # X-Env-Var-lab_ssh: n
 # X-Env-Var-lab_ssh-Desc: When y, leave sshd enabled for a lab image. Default
 #  n removes the ssh.service enablement symlink. Host keys are never baked in.
