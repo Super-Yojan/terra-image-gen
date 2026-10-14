@@ -47,6 +47,12 @@ rm -f "$root"/etc/ssh/ssh_host_*
 rm -f "$root/var/lib/terra-rover/owner.json" \
       "$root/var/lib/terra-rover/device-name.json"
 
+# Imager's user rename edits this exact filename. sudo ignores it unless the
+# mode is 0440, and git does not store that mode.
+if [[ -f $root/etc/sudoers.d/010_pi-nopasswd ]]; then
+   chmod 0440 "$root/etc/sudoers.d/010_pi-nopasswd"
+fi
+
 # Placeholder hostname. terra-firstboot replaces it from the Pi serial.
 printf '%s\n' terra > "$root/etc/hostname"
 if [[ -f $root/etc/hosts ]]; then
