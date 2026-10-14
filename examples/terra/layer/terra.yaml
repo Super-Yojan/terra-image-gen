@@ -114,6 +114,7 @@ mmdebstrap:
     - e2fsprogs
     - wpasupplicant
     - iw
+    - rfkill
     - tzdata
     - keyboard-configuration
     - console-setup
