@@ -12,7 +12,7 @@ Run this on a Pi 4 and a Pi 5, each with a Fusion HAT, an external battery cutof
 ## Boot
 
 - [ ] The Pi reaches multi-user without a login.
-- [ ] `hostname` is `terra-` plus the last six hex digits of `/sys/firmware/devicetree/base/serial-number`.
+- [ ] With no hostname set in Imager, `hostname` is `terra-` plus the last six hex digits of `/sys/firmware/devicetree/base/serial-number`. A hostname set in Imager is kept.
 - [ ] `findmnt -no SIZE /` is larger than the image's root partition (filesystem expanded).
 - [ ] `cat /etc/terra-image-release` matches the manifest published with the image.
 - [ ] `systemctl is-enabled terra-rover.service` is `enabled`.

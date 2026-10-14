@@ -7,7 +7,9 @@
 #   ./examples/terra/scripts/build-image.sh
 #
 # sshd is enabled. No password, authorized_keys, or Wi-Fi PSK is baked in.
-# Put a public key on the FAT boot partition. See examples/terra/README.md.
+# Raspberry Pi Imager systemd customisation can set them. See
+# examples/terra/docs/flash-with-imager.md. A public key on the FAT boot
+# partition also works. See examples/terra/README.md.
 # Set terra.lab_ssh to n to ship sshd disabled. Lab Wi-Fi stays off unless
 # both terra.lab_wifi_ssid and terra.lab_wifi_psk are set.
 

@@ -28,28 +28,35 @@ if [ -e /var/lib/terra-image/fusion-config-changed ]; then
     rm -f /var/lib/terra-image/fusion-config-changed
 fi
 
-serial=
-if [ -r /sys/firmware/devicetree/base/serial-number ]; then
-    serial=$(tr -d '\0' < /sys/firmware/devicetree/base/serial-number | tr 'A-F' 'a-f' | tr -cd '0-9a-f')
-fi
-if [ -n "$serial" ]; then
-    suffix=$(printf '%s' "$serial" | tail -c 6)
+# Raspberry Pi Imager's firstrun.sh already wrote /etc/hostname. Keep that
+# name. The placeholder "terra" is the only hostname this script replaces.
+current=$(tr -d ' \t\n\r' < /etc/hostname 2>/dev/null || true)
+if [ "$current" = terra ] || [ -z "$current" ]; then
+    serial=
+    if [ -r /sys/firmware/devicetree/base/serial-number ]; then
+        serial=$(tr -d '\0' < /sys/firmware/devicetree/base/serial-number | tr 'A-F' 'a-f' | tr -cd '0-9a-f')
+    fi
+    if [ -n "$serial" ]; then
+        suffix=$(printf '%s' "$serial" | tail -c 6)
+    else
+        # QEMU and other hosts without a device-tree serial still need a unique name.
+        suffix=$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')
+        log "no Pi serial; using random hostname suffix"
+    fi
+    name="terra-$suffix"
+    printf '%s\n' "$name" > /etc/hostname
+    hostname "$name" 2>/dev/null || true
+    if [ -f /etc/hosts ]; then
+        grep -v '127.0.1.1' /etc/hosts > /etc/hosts.terra-new || true
+    else
+        : > /etc/hosts.terra-new
+    fi
+    printf '127.0.1.1 %s\n' "$name" >> /etc/hosts.terra-new
+    mv /etc/hosts.terra-new /etc/hosts
+    log "hostname $name"
 else
-    # QEMU and other hosts without a device-tree serial still need a unique name.
-    suffix=$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')
-    log "no Pi serial; using random hostname suffix"
+    log "keeping hostname $current"
 fi
-name="terra-$suffix"
-printf '%s\n' "$name" > /etc/hostname
-hostname "$name" 2>/dev/null || true
-if [ -f /etc/hosts ]; then
-    grep -v '127.0.1.1' /etc/hosts > /etc/hosts.terra-new || true
-else
-    : > /etc/hosts.terra-new
-fi
-printf '127.0.1.1 %s\n' "$name" >> /etc/hosts.terra-new
-mv /etc/hosts.terra-new /etc/hosts
-log "hostname $name"
 
 root_src=$(findmnt -no SOURCE / 2>/dev/null || true)
 case "$root_src" in

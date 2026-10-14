@@ -1,0 +1,29 @@
+#!/bin/sh
+# Pull the tools terra-imager-fixup needs into the initramfs.
+set -e
+
+PREREQ=""
+
+prereqs() {
+  echo "${PREREQ}"
+}
+
+case "${1:-}" in
+  prereqs)
+    prereqs
+    exit 0
+    ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+copy_exec /bin/findmnt /bin
+copy_exec /bin/sed /bin
+copy_exec /bin/readlink /bin
+if [ -x /sbin/reboot ]; then
+  copy_exec /sbin/reboot /sbin
+elif [ -x /usr/sbin/reboot ]; then
+  copy_exec /usr/sbin/reboot /sbin
+fi
+
+exit 0

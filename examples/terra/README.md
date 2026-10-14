@@ -57,13 +57,13 @@ Outputs (names follow the artefact version directory):
 
 `terra-firstboot.service` copies headless-access files off the FAT boot partition, sets the hostname to `terra-` plus the last six hex digits of the Pi serial (or a random suffix when no serial exists), and grows the root filesystem to the card. systemd generates `machine-id` because the file ships empty. SSH host keys are absent from the image; `ssh-hostkeys-generate.service` creates a new set before sshd listens. `terra-rover` generates `terra-XXXXXX` itself the first time it can write `/var/lib/terra-rover/device-name.json`. That file is not in the image.
 
-sshd is enabled. The `pi` account has no password (`*` in `/etc/shadow`, not a lock), so password login is refused and a public key works. `pi` can `sudo` without a password, because there is no password to type. Nothing in the image is a shared default password. If a flasher rewrote `config.txt` and dropped the Fusion HAT lines, first boot puts them back and reboots once.
+sshd is enabled. The `pi` account has no password (`*` in `/etc/shadow`, not a lock). A public key works. Password login works after Raspberry Pi Imager, or a `custom.toml` on the boot partition, sets a password. Until then sshd has nothing to accept. `pi` can `sudo` without a password. Nothing in the image is a shared default password. If a flasher rewrote `config.txt` and dropped the Fusion HAT lines, first boot puts them back and reboots once. A hostname Imager already set is kept; the serial name is only used when the hostname is still the placeholder `terra`.
 
 The USR button only opens `terra-rover`'s pairing window. sshd does not wait on that button, on Bluetooth, or on `terra-rover.service`. Holding the button is not required to recover the Pi over SSH.
 
 ### Log in on a new card
 
-1. Flash `terra-bookworm-arm64.img.xz` with `flash-cards.sh` or Raspberry Pi Imager. Imager's own customisation is optional; the steps below work after any raw write.
+1. Flash `terra-bookworm-arm64.img.xz` with `flash-cards.sh`, or with Raspberry Pi Imager using the Terra OS list. The Imager steps (username, password, Wi-Fi, hostname, locale) are in [docs/flash-with-imager.md](docs/flash-with-imager.md). The steps below work after any raw write, including a card Imager customised.
 2. Put the card back in the computer you flashed from. Open the small FAT partition (the one that contains `config.txt`).
 3. Copy your SSH public key into a file named `authorized_keys` on that partition, one key per line. From the machine you will connect from:
 
@@ -120,7 +120,7 @@ country = "US"
 
 Set `country` to the regulatory country of the network. A `[user]` password in that file is applied when you put one there. Leave it out to keep the account key-only. `password_authentication = true` is honored only together with a password in the same file. `ssh_import_id` is not fetched. A cloud-init `user-data` whose first line is `#cloud-config` can also supply `ssh_authorized_keys`; cloud-init itself is not installed.
 
-Imager's OS customisation writes one of these files (or a one-shot `firstrun.sh`). Both the file copy and Imager customisation are supported. Do not bake a Wi-Fi PSK into the image you publish.
+Raspberry Pi Imager's built-in customisation uses `init_format` `systemd`: it writes `firstrun.sh` and a `systemd.run=` kernel parameter, and the image applies that on first boot. The website-ready steps are in [docs/flash-with-imager.md](docs/flash-with-imager.md). Do not bake a Wi-Fi PSK into the image you publish.
 
 ### Lab images
 
@@ -153,7 +153,7 @@ The script refuses the disk that holds `/` and refuses non-removable disks. `bma
 sudo ./examples/terra/scripts/check-image.sh --image work/deploy-*/terra-bookworm-arm64.img
 ```
 
-This mounts the root filesystem and the FAT boot partition. It checks the binary (`terra-rover --check-bundle` under qemu-user on a non-arm64 host), the enabled service, the account, the Fusion HAT module, the Fusion HAT `config.txt` lines and the overlay on the boot partition, that sshd is enabled with password authentication off, and the absence of host keys, machine-id, an owner bond, and credentials.
+This mounts the root filesystem and the FAT boot partition. It checks the binary (`terra-rover --check-bundle` under qemu-user on a non-arm64 host), the enabled service, the account, the Fusion HAT module, the Fusion HAT `config.txt` lines and the overlay on the boot partition, that sshd is enabled and the image ships no password, that the Imager `firstrun.sh` fixup is in the initramfs, and the absence of host keys, machine-id, an owner bond, and credentials.
 
 `scripts/test-check-fixture.sh` runs the same checker against a synthetic root so the negative cases stay covered without a full image build.
 
@@ -175,6 +175,8 @@ examples/terra/
   layer/terra.yaml
   layer/terra.d/
   scripts/
+  imager/                       # OS list JSON and Imager launchers
+  docs/flash-with-imager.md
   ci/terra-rover-release.yml    # file to add in Super-Yojan/Terra
   HARDWARE-CHECKLIST.md
 ```

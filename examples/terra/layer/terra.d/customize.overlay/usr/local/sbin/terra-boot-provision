@@ -186,9 +186,11 @@ tval() {
 }
 
 login=pi
+name_requested=0
 if name=$(tval user.name); then
    case $name in
       ""|*[!a-zA-Z0-9_-]*) log "ignoring user name '$name'"; name=pi ;;
+      *) name_requested=1 ;;
    esac
    login=$name
 fi
@@ -201,14 +203,17 @@ if [[ ! -f $passwd_file ]]; then
 fi
 
 if ! awk -F: -v u="$login" '$1==u { found=1 } END { exit !found }' "$passwd_file"; then
-   if [[ -n $root ]]; then
-      log "user $login does not exist in this root; SSH keys for that name are skipped"
-      login=
-   else
+   # Imager's firstrun.sh renames uid 1000 before this runs. Do not recreate
+   # "pi" in that case. A custom.toml user name that is not on the system yet
+   # is still created on the device.
+   if [[ $name_requested -eq 1 && -z $root ]]; then
       adduser --disabled-password --gecos "" "$login"
       printf '%s\n' "$login ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/010_terra-${login}"
       chmod 0440 "/etc/sudoers.d/010_terra-${login}"
       adduser "$login" sudo || true
+   else
+      log "user $login does not exist; SSH keys for that name are skipped"
+      login=
    fi
 fi
 
@@ -407,6 +412,22 @@ elif ssid=$(tval wlan.ssid); then
       chmod 0600 "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
       log "installed Wi-Fi from custom.toml"
    fi
+fi
+
+# Imager's systemd firstrun writes /etc/wpa_supplicant/wpa_supplicant.conf.
+# networkd on this image associates through wpa_supplicant@wlan0, which reads
+# wpa_supplicant-wlan0.conf. The D-Bus policy at
+# /etc/dbus-1/system.d/wpa_supplicant.conf is a different file.
+generic_wpa=$root/etc/wpa_supplicant/wpa_supplicant.conf
+wlan_wpa=$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+if [[ ! -f $wlan_wpa && -f $generic_wpa ]]; then
+   install -d -m 0755 "$root/etc/wpa_supplicant"
+   cat "$generic_wpa" > "$wlan_wpa"
+   chmod 0600 "$wlan_wpa"
+   if [[ -z ${country:-} ]]; then
+      country=$(sed -n 's/^country=\([A-Za-z][A-Za-z]\).*/\1/p' "$generic_wpa" | head -n 1)
+   fi
+   log "bridged Imager wpa_supplicant.conf onto wpa_supplicant-wlan0.conf"
 fi
 
 if [[ -f $root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf ]]; then

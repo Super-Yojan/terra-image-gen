@@ -54,6 +54,15 @@ cp "$overlay/etc/terra-image/fusion-hat.config" "$good/etc/terra-image/fusion-ha
 cp "$overlay/etc/modules-load.d/terra-i2c.conf" "$good/etc/modules-load.d/terra-i2c.conf"
 cp "$overlay/etc/ssh/sshd_config.d/99-terra-access.conf" "$good/etc/ssh/sshd_config.d/99-terra-access.conf"
 cp "$overlay/usr/local/sbin/terra-boot-provision" "$good/usr/local/sbin/terra-boot-provision"
+cp "$overlay/usr/local/sbin/terra-firstboot" "$good/usr/local/sbin/terra-firstboot"
+mkdir -p "$good/etc/sudoers.d" \
+   "$good/etc/initramfs-tools/scripts/local-bottom" \
+   "$good/etc/initramfs-tools/hooks"
+cp "$overlay/etc/sudoers.d/010_pi-nopasswd" "$good/etc/sudoers.d/010_pi-nopasswd"
+cp "$overlay/etc/initramfs-tools/scripts/local-bottom/terra-imager-fixup" \
+   "$good/etc/initramfs-tools/scripts/local-bottom/terra-imager-fixup"
+cp "$overlay/etc/initramfs-tools/hooks/terra-imager-fixup" \
+   "$good/etc/initramfs-tools/hooks/terra-imager-fixup"
 : > "$good/lib/systemd/system/ssh.service"
 ln -s ../../../../lib/systemd/system/ssh.service \
    "$good/etc/systemd/system/multi-user.target.wants/ssh.service"

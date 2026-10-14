@@ -1,0 +1,111 @@
+#!/bin/sh
+# Raspberry Pi Imager's systemd customisation writes firstrun.sh and appends
+# systemd.run=/boot/firstrun.sh. Bookworm mounts the FAT partition at
+# /boot/firmware, so that path does not exist and kernel-command-line.target
+# never reaches multi-user. This is the Bookworm/Trixie imager_fixup: rewrite
+# the boot files, leave a copy where the current kernel cmdline looks, and
+# reboot so the firmware picks up systemd.run=/boot/firmware/firstrun.sh.
+#
+# TERRA_IMAGER_FIXUP_DIR runs only the file rewrite, for the host test.
+set -e
+
+case "${1:-}" in
+  prereqs)
+    exit 0
+    ;;
+esac
+
+rewrite_imager_boot() {
+  dir=$1
+  if [ -f "$dir/cmdline.txt" ]; then
+    # /boot/firmware/ is not rewritten twice: the pattern is the /boot/ prefix
+    # Imager writes, and this runs once per boot.
+    sed -i 's|/boot/|/boot/firmware/|g' "$dir/cmdline.txt"
+  fi
+  if [ -f "$dir/firstrun.sh" ]; then
+    # Drop Imager's cleanup (it edits /boot/cmdline.txt, the rootfs stub) and
+    # append cleanup that matches this image's mount.
+    sed -n -i '/rm.*firstrun\.sh$/q;p' "$dir/firstrun.sh"
+    cat >> "$dir/firstrun.sh" << 'EOF'
+rm -f /boot/firmware/firstrun.sh /boot/firstrun.sh
+sed -i 's| systemd\.[^ ]*||g' /boot/firmware/cmdline.txt
+exit 0
+EOF
+  fi
+}
+
+if [ -n "${TERRA_IMAGER_FIXUP_DIR:-}" ]; then
+  rewrite_imager_boot "$TERRA_IMAGER_FIXUP_DIR"
+  exit 0
+fi
+
+. /scripts/functions
+
+if ! grep -q 'systemd\.run=/boot/firstrun\.sh' /proc/cmdline; then
+  exit 0
+fi
+
+log_begin_msg "Fixing Raspberry Pi Imager firstrun.sh"
+
+mkdir -p /run/imager_fixup
+mounted=0
+
+try_mount() {
+  dev=$1
+  [ -n "$dev" ] && [ -e "$dev" ] || return 1
+  mount -o rw "$dev" /run/imager_fixup
+}
+
+if BOOT_SPEC=$(findmnt -n -o SOURCE -s -F root/etc/fstab /boot/firmware 2>/dev/null); then
+  resolved=$(resolve_device "$BOOT_SPEC" 2>/dev/null || true)
+  if try_mount "$resolved"; then
+    mounted=1
+  elif try_mount "$BOOT_SPEC"; then
+    mounted=1
+  fi
+fi
+
+if [ "$mounted" -eq 0 ]; then
+  root_src=$(awk '$2=="/root" { print $1; exit }' /proc/mounts)
+  if [ -n "$root_src" ]; then
+    root_real=$(readlink -f "$root_src" 2>/dev/null || echo "$root_src")
+    case "$root_real" in
+      *2)
+        boot_guess=$(printf '%s' "$root_real" | sed 's/2$/1/')
+        if try_mount "$boot_guess"; then
+          mounted=1
+        fi
+        ;;
+    esac
+  fi
+fi
+
+if [ "$mounted" -eq 1 ]; then
+  rewrite_imager_boot /run/imager_fixup
+  if [ -f /run/imager_fixup/firstrun.sh ]; then
+    mkdir -p /root/boot
+    if ! cp /run/imager_fixup/firstrun.sh /root/boot/firstrun.sh 2>/dev/null; then
+      mount -o remount,rw /root 2>/dev/null || true
+      cp /run/imager_fixup/firstrun.sh /root/boot/firstrun.sh
+    fi
+    chmod 0755 /root/boot/firstrun.sh 2>/dev/null || true
+  fi
+  umount /run/imager_fixup
+fi
+rmdir /run/imager_fixup 2>/dev/null || true
+
+log_end_msg
+
+# The kernel cmdline for this boot is already loaded. Reboot so the firmware
+# reads the rewritten cmdline.txt. If reboot is missing, the /root/boot copy
+# still matches systemd.run=/boot/firstrun.sh on this boot.
+if [ "$mounted" -eq 1 ]; then
+  sync
+  mount -o remount,ro /root 2>/dev/null || true
+  if command -v reboot >/dev/null 2>&1; then
+    reboot -f 1 || reboot -f || true
+    sleep 5
+  fi
+fi
+
+exit 0

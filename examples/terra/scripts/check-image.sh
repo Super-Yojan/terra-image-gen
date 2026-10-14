@@ -91,6 +91,7 @@ if [[ -n $image ]]; then
       MTOOLS_SKIP_CHECK=1 mtype -i "$fat" ::/config.txt > "$bootfs/config.txt"
       mkdir -p "$bootfs/overlays"
       MTOOLS_SKIP_CHECK=1 mcopy -n -i "$fat" ::/overlays/sunfounder-fusionhat.dtbo "$bootfs/overlays/"
+      MTOOLS_SKIP_CHECK=1 mcopy -n -i "$fat" ::/initramfs8 "$bootfs/initramfs8"
       echo "ok: boot partition read with mtools (vfat is not mountable here)"
    fi
    cleanup_mount=1
@@ -129,12 +130,13 @@ else
 fi
 if exists "$root/etc/ssh/sshd_config.d/99-terra-access.conf"; then
    access=$(readf "$root/etc/ssh/sshd_config.d/99-terra-access.conf")
-   grep -qx 'PasswordAuthentication no' <<< "$access" || fail "password authentication is not disabled"
+   grep -qx 'PasswordAuthentication no' <<< "$access" && fail "drop-in forces PasswordAuthentication no, which blocks an Imager password"
    grep -qx 'PubkeyAuthentication yes' <<< "$access" || fail "public-key authentication is not enabled"
+   grep -qx 'PermitRootLogin no' <<< "$access" || fail "root login is not disabled"
 else
    fail "missing sshd drop-in 99-terra-access.conf"
 fi
-ok "public-key SSH, password authentication off"
+ok "SSH allows a password once one is set, and allows public keys"
 
 owner_hits=$(if [[ $cleanup_mount -eq 1 ]]; then
    sudo find "$root/var/lib/terra-rover" "$root/etc/terra-rover" \( -iname '*owner*' -o -name 'device-name.json' \) -print 2>/dev/null || true
@@ -280,7 +282,49 @@ prov=$(readf "$provision")
 grep -q 'custom.toml' <<< "$prov" || fail "boot provisioner does not read custom.toml"
 grep -q 'authorized_keys' <<< "$prov" || fail "boot provisioner does not install authorized_keys"
 grep -q 'wpa_supplicant.conf' <<< "$prov" || fail "boot provisioner does not install wpa_supplicant.conf"
+grep -q 'wpa_supplicant-wlan0.conf' <<< "$prov" || fail "boot provisioner does not bridge wpa_supplicant.conf"
 ok "headless boot-partition provisioner"
+
+sudoers=$(readf "$root/etc/sudoers.d/010_pi-nopasswd")
+grep -qx 'pi ALL=(ALL) NOPASSWD: ALL' <<< "$sudoers" || fail "010_pi-nopasswd is missing the pi rule Imager renames"
+ok "Imager sudoers rename target"
+
+fixup=$root/etc/initramfs-tools/scripts/local-bottom/terra-imager-fixup
+hook=$root/etc/initramfs-tools/hooks/terra-imager-fixup
+exists "$fixup" || fail "terra-imager-fixup initramfs script missing"
+exists "$hook" || fail "terra-imager-fixup initramfs hook missing"
+fixup_text=$(readf "$fixup")
+grep -q 'systemd\.run=/boot/firstrun' <<< "$fixup_text" || fail "fixup does not look for Imager's systemd.run path"
+grep -q '/boot/firmware/firstrun.sh' <<< "$fixup_text" || fail "fixup does not rewrite the firstrun path"
+grep -q '/root/boot/firstrun.sh' <<< "$fixup_text" || fail "fixup does not leave a /boot/firstrun.sh copy"
+grep -q 'reboot -f' <<< "$fixup_text" || fail "fixup does not reboot so the firmware re-reads cmdline.txt"
+hook_text=$(readf "$hook")
+grep -q 'findmnt' <<< "$hook_text" || fail "initramfs hook does not copy findmnt"
+firstboot=$root/usr/local/sbin/terra-firstboot
+exists "$firstboot" || fail "terra-firstboot missing"
+grep -q 'keeping hostname' <<< "$(readf "$firstboot")" || fail "first boot overwrites an Imager hostname"
+ok "Imager systemd firstrun fixup"
+
+if [[ -n $image ]]; then
+   initrd=$bootfs/initramfs8
+   exists "$initrd" || fail "boot partition is missing initramfs8"
+   if command -v lsinitramfs >/dev/null 2>&1; then
+      if [[ $cleanup_mount -eq 1 ]]; then
+         listing=$(sudo lsinitramfs "$initrd")
+      else
+         listing=$(lsinitramfs "$initrd")
+      fi
+   else
+      if [[ $cleanup_mount -eq 1 ]]; then
+         listing=$(sudo gzip -dc "$initrd" | cpio -t 2>/dev/null || true)
+      else
+         listing=$(gzip -dc "$initrd" | cpio -t 2>/dev/null || true)
+      fi
+   fi
+   grep -q 'scripts/local-bottom/terra-imager-fixup' <<< "$listing" || fail "initramfs8 does not contain terra-imager-fixup"
+   grep -q 'findmnt' <<< "$listing" || fail "initramfs8 does not contain findmnt"
+   ok "initramfs8 contains the Imager fixup"
+fi
 
 manifest=$(readf "$root/etc/terra-image-release")
 grep -q '^TERRA_FUSION_COMMIT=4bd1018ad5a70ee113160536f969cdadd9f22918$' <<< "$manifest" || fail "manifest fusion commit"

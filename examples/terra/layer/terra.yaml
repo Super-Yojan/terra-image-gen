@@ -6,8 +6,9 @@
 #  kernel driver (DKMS, image kernel headers, vendor overlay, I2C, SPI, I2S)
 #  and the terra-rover service. Does not install the vendor audio or voice
 #  stack, does not create an owner bond, and does not bake Wi-Fi, passwords,
-#  or SSH keys. sshd is enabled so a key dropped on the boot partition can
-#  log in.
+#  or SSH keys. sshd is enabled. Raspberry Pi Imager systemd customisation
+#  (firstrun.sh) can set a username, password, SSH key, Wi-Fi, hostname, and
+#  locale. A key dropped on the boot partition can log in too.
 # X-Env-Layer-Requires: bookworm-minbase,bluez
 # X-Env-Layer-RequiresProvider: rpi-device,systemd
 #
@@ -113,6 +114,9 @@ mmdebstrap:
     - e2fsprogs
     - wpasupplicant
     - iw
+    - tzdata
+    - keyboard-configuration
+    - console-setup
     - kmod
     - dbus
     - curl

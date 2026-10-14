@@ -114,4 +114,28 @@ grep -q 'ssid="other"' "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
 [[ ! -e $boot/wpa_supplicant.conf ]]
 awk -F: '$1=="pi" && $2=="*" { found=1 } END { exit !found }' "$root/etc/shadow"
 
+# Imager writes wpa_supplicant.conf, not the interface-specific file.
+rm -f "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" \
+   "$root/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service"
+cat > "$root/etc/wpa_supplicant/wpa_supplicant.conf" << 'EOF'
+country=DE
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+network={
+	ssid="imager-net"
+	psk=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+}
+EOF
+TERRA_ROOT=$root TERRA_BOOT=$boot "$provision"
+grep -q 'ssid="imager-net"' "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+[[ $(stat -c '%a' "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf") == 600 ]]
+[[ -L $root/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service ]]
+grep -q 'ieee80211_regdom=DE' "$root/etc/modprobe.d/cfg80211_regdomain.conf"
+
+# A renamed Imager user must not cause a new "pi" account to be created.
+awk -F: '$1!="pi"' "$root/etc/passwd" > "$root/etc/passwd.nopi"
+mv "$root/etc/passwd.nopi" "$root/etc/passwd"
+printf '%s\n' 'rover:x:1000:1000::/home/rover:/bin/bash' >> "$root/etc/passwd"
+TERRA_ROOT=$root TERRA_BOOT=$boot "$provision"
+awk -F: '$1=="pi" { found=1 } END { exit found }' "$root/etc/passwd"
+
 echo "boot provision checks passed"
