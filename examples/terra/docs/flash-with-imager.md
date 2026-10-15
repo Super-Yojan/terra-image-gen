@@ -84,7 +84,7 @@ https://github.com/Super-Yojan/terra-image-gen/releases/download/terra-image-v0.
 
 - sha256: `56c89d430b2f05152657b9ef916718879d4a18ad472c31edfe2ae66e80b7e464`
 - size: 289423836 bytes
-- uncompressed image sha256: `bfe43f3904a34946b2f9d0ec2ff94e43998a94ba4cc7d8aae53ef5a4823b8c9f`
+- uncompressed image sha256: `063c33ce99d00c703953859b2b22534a77c6d4fe3d2885f08820a34bc95c07bb`
 - uncompressed size: 2063597568 bytes
 
 Imager checks the download against `image_download_sha256` in the OS list before it writes.

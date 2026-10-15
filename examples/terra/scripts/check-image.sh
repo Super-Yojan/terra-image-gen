@@ -65,7 +65,7 @@ if [[ -n $image ]]; then
          xz -dc "$image" > "$raw"
          ;;
    esac
-   loop=$(sudo losetup --find --show --partscan "$raw")
+   loop=$(sudo losetup --read-only --find --show --partscan "$raw")
    # Some kernels do not create partition nodes from --partscan alone.
    for _ in 1 2 3 4 5 6 7 8 9 10; do
       [[ -b ${loop}p1 && -b ${loop}p2 ]] && break
@@ -78,7 +78,7 @@ if [[ -n $image ]]; then
    root=$tmpdir/root
    bootfs=$tmpdir/boot
    mkdir -p "$root" "$bootfs"
-   sudo mount -o ro "${loop}p2" "$root"
+   sudo mount -o ro,noload "${loop}p2" "$root"
    if sudo mount -o ro "${loop}p1" "$bootfs" 2>/dev/null; then
       boot_mounted=1
    else
