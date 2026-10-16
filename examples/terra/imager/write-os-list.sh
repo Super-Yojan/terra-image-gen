@@ -1,19 +1,19 @@
 #!/bin/bash
 # Fill examples/terra/imager/terra-os-list.json from a built image.
-#   write-os-list.sh path/to/terra-bookworm-arm64.img path/to/terra-bookworm-arm64.img.xz
+#   write-os-list.sh path/to/terra-bookworm-arm64.img.xz
+# extract_* are computed from the .xz itself, so they always match what Imager decompresses.
 set -euo pipefail
 
-img=${1:?uncompressed image}
-xz=${2:?compressed image}
-[[ -f $img && -f $xz ]] || { echo "missing image" >&2; exit 1; }
+xz=${1:?compressed image}
+[[ -f $xz ]] || { echo "missing image" >&2; exit 1; }
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 out=$here/terra-os-list.json
 url=${TERRA_IMAGE_URL:-https://github.com/Super-Yojan/terra-image-gen/releases/download/terra-image-v0.1.0-rc3/terra-bookworm-arm64.img.xz}
 date=${TERRA_RELEASE_DATE:-2026-10-14}
 
-extract_size=$(stat -c '%s' "$img")
-extract_sha=$(sha256sum "$img" | awk '{ print $1 }')
+extract_size=$(xz -dc "$xz" | wc -c)
+extract_sha=$(xz -dc "$xz" | sha256sum | awk '{ print $1 }')
 download_size=$(stat -c '%s' "$xz")
 download_sha=$(sha256sum "$xz" | awk '{ print $1 }')
 

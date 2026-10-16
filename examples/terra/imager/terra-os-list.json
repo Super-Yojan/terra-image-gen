@@ -31,7 +31,7 @@
       "icon": "https://downloads.raspberrypi.com/raspios_armhf/Raspberry_Pi_OS_(32-bit).png",
       "url": "https://github.com/Super-Yojan/terra-image-gen/releases/download/terra-image-v0.1.0-rc3/terra-bookworm-arm64.img.xz",
       "extract_size": 2063597568,
-      "extract_sha256": "bfe43f3904a34946b2f9d0ec2ff94e43998a94ba4cc7d8aae53ef5a4823b8c9f",
+      "extract_sha256": "063c33ce99d00c703953859b2b22534a77c6d4fe3d2885f08820a34bc95c07bb",
       "image_download_size": 289423836,
       "image_download_sha256": "56c89d430b2f05152657b9ef916718879d4a18ad472c31edfe2ae66e80b7e464",
       "release_date": "2026-10-14",
