@@ -1,0 +1,460 @@
+#!/bin/bash
+# Apply Fusion HAT config.txt lines and optional headless access files from
+# the FAT boot partition. Secrets placed there are removed after they are
+# copied onto the root filesystem.
+#
+# TERRA_ROOT  Image root during a build. Empty on the device.
+# TERRA_BOOT  Firmware directory. Discovered when empty.
+# TERRA_SSH_DEFAULT  y (default) leaves sshd enabled. n leaves it disabled
+#   unless the boot partition turns it on.
+set -euo pipefail
+
+root=${TERRA_ROOT:-}
+ssh_default=${TERRA_SSH_DEFAULT:-y}
+changed_flag=${root}/var/lib/terra-image/fusion-config-changed
+
+log() { echo "terra-boot-provision: $*" >&2; }
+
+boot=${TERRA_BOOT:-}
+if [[ -z $boot ]]; then
+   for candidate in "${root}/boot/firmware" "${root}/boot"; do
+      if [[ -f $candidate/config.txt ]]; then
+         boot=$candidate
+         break
+      fi
+   done
+fi
+[[ -n $boot && -f $boot/config.txt ]] || {
+   log "config.txt not found"
+   exit 1
+}
+
+if [[ -z $root ]]; then
+   mountpoint -q "$boot" && mount -o remount,rw "$boot" 2>/dev/null || true
+fi
+
+snippet=${root}/etc/terra-image/fusion-hat.config
+[[ -f $snippet ]] || { log "missing $snippet"; exit 1; }
+
+cfg=$boot/config.txt
+config_changed=0
+
+# Stock images enable the Pi PWM analog audio device. The pinned Fusion HAT
+# overlay replaces that sound node with its I2S voicehat, so leave audio off.
+if grep -qx 'dtparam=audio=on' "$cfg"; then
+   sed -i 's/^dtparam=audio=on$/dtparam=audio=off/' "$cfg"
+   config_changed=1
+fi
+
+while IFS= read -r line || [[ -n $line ]]; do
+   [[ -n $line ]] || continue
+   if grep -qx "#$line" "$cfg"; then
+      sed -i "s/^#${line}\$/${line}/" "$cfg"
+      config_changed=1
+   fi
+done < "$snippet"
+
+# Repeat the required lines in a final [all] block so they stay visible at
+# the end of the file. dtparam may occur twice; the firmware uses the last
+# value. dtoverlay must occur once, or the overlay is applied twice.
+if ! grep -q '^# Terra Fusion HAT\.' "$cfg"; then
+   cat >> "$cfg" << 'EOF'
+
+# Terra Fusion HAT. The pinned installer writes dtoverlay=sunfounder-fusionhat.
+# raspi-config do_i2c writes dtparam=i2c_arm=on. SPI and I2S are the HAT
+# interfaces (GPIO8-11 and GPIO18-21). audio=off keeps the Pi PWM analog
+# device from claiming the sound node the overlay replaces. HAT PWM is the
+# MCU at I2C 0x17, not a Pi pwm overlay. The vendor audio userspace stack
+# is not installed.
+[all]
+EOF
+   while IFS= read -r line || [[ -n $line ]]; do
+      [[ -n $line ]] || continue
+      if [[ $line == dtoverlay=* ]] && grep -qx "$line" "$cfg"; then
+         continue
+      fi
+      printf '%s\n' "$line" >> "$cfg"
+   done < "$snippet"
+   config_changed=1
+fi
+
+overlay_count=$(grep -cx 'dtoverlay=sunfounder-fusionhat' "$cfg" || true)
+if [[ $overlay_count -ne 1 ]]; then
+   log "dtoverlay=sunfounder-fusionhat must appear exactly once in $cfg (found $overlay_count)"
+   exit 1
+fi
+if grep -qx 'dtparam=audio=on' "$cfg"; then
+   log "dtparam=audio=on is still active in $cfg"
+   exit 1
+fi
+
+# raspi-config do_i2c also lists i2c-dev in /etc/modules. systemd loads the
+# modules-load.d drop-in; mirror the module into /etc/modules when that
+# file is already present.
+if [[ -f $root/etc/modules ]] && ! grep -qx 'i2c-dev' "$root/etc/modules"; then
+   printf '%s\n' 'i2c-dev' >> "$root/etc/modules"
+fi
+
+if [[ $config_changed -eq 1 && -z $root ]]; then
+   mkdir -p "$(dirname "$changed_flag")"
+   : > "$changed_flag"
+   log "Fusion HAT lines were missing; a reboot is required"
+fi
+
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+
+# Subset of Raspberry Pi OS custom.toml / rpi-preseed.toml. Values are written
+# as files, never evaluated.
+parse_toml() {
+   local file=$1 dest=$2
+   mkdir -p "$dest"
+   awk -v out="$dest" '
+      function trim(s) { gsub(/^[ \t\r]+|[ \t\r]+$/, "", s); return s }
+      function unquote(s,    t) {
+         s = trim(s)
+         if (s ~ /^".*"$/) {
+            t = substr(s, 2, length(s) - 2)
+            gsub(/\\"/, "\"", t)
+            gsub(/\\\\/, "\\", t)
+            return t
+         }
+         return s
+      }
+      function emit(k, v) { print v > (out "/" k); close(out "/" k) }
+      BEGIN { section = ""; inarr = "" }
+      /^[ \t]*($|#)/ { next }
+      /^[ \t]*\[[^]]+\][ \t\r]*$/ {
+         section = $0
+         gsub(/[\[\] \t\r]/, "", section)
+         inarr = ""
+         next
+      }
+      {
+         line = $0
+         sub(/\r$/, "", line)
+         if (inarr != "") {
+            while (match(line, /"([^"\\]|\\.)*"/)) {
+               s = substr(line, RSTART, RLENGTH)
+               print unquote(s) >> (out "/" inarr)
+               line = substr(line, RSTART + RLENGTH)
+            }
+            if (line ~ /\]/) inarr = ""
+            next
+         }
+         eq = index(line, "=")
+         if (eq == 0) next
+         key = trim(substr(line, 1, eq - 1))
+         val = trim(substr(line, eq + 1))
+         full = section "." key
+         if (val ~ /^\[/) {
+            inarr = full
+            rest = val
+            sub(/^\[/, "", rest)
+            while (match(rest, /"([^"\\]|\\.)*"/)) {
+               s = substr(rest, RSTART, RLENGTH)
+               print unquote(s) >> (out "/" full)
+               rest = substr(rest, RSTART + RLENGTH)
+            }
+            if (rest ~ /\]/) inarr = ""
+            next
+         }
+         if (val ~ /^"/) emit(full, unquote(val))
+         else {
+            sub(/[ \t]+#.*/, "", val)
+            emit(full, trim(val))
+         }
+      }
+   ' "$file"
+}
+
+toml=$tmpdir/toml
+mkdir -p "$toml"
+consumed=()
+for name in custom.toml rpi-preseed.toml; do
+   if [[ -f $boot/$name ]]; then
+      parse_toml "$boot/$name" "$toml"
+      consumed+=("$boot/$name")
+      log "read $boot/$name"
+   fi
+done
+
+tval() {
+   local key=$1
+   [[ -f $toml/$key ]] || return 1
+   tr -d '\r' < "$toml/$key"
+}
+
+login=pi
+name_requested=0
+if name=$(tval user.name); then
+   case $name in
+      ""|*[!a-zA-Z0-9_-]*) log "ignoring user name '$name'"; name=pi ;;
+      *) name_requested=1 ;;
+   esac
+   login=$name
+fi
+
+passwd_file=$root/etc/passwd
+shadow=$root/etc/shadow
+if [[ ! -f $passwd_file ]]; then
+   log "missing $passwd_file"
+   exit 1
+fi
+
+if ! awk -F: -v u="$login" '$1==u { found=1 } END { exit !found }' "$passwd_file"; then
+   # Imager's firstrun.sh renames uid 1000 before this runs. Do not recreate
+   # "pi" in that case. A custom.toml user name that is not on the system yet
+   # is still created on the device.
+   if [[ $name_requested -eq 1 && -z $root ]]; then
+      adduser --disabled-password --gecos "" "$login"
+      printf '%s\n' "$login ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/010_terra-${login}"
+      chmod 0440 "/etc/sudoers.d/010_terra-${login}"
+      adduser "$login" sudo || true
+   else
+      log "user $login does not exist; SSH keys for that name are skipped"
+      login=
+   fi
+fi
+
+uid=
+gid=
+home=
+if [[ -n $login ]]; then
+   uid=$(awk -F: -v u="$login" '$1==u { print $3 }' "$passwd_file")
+   gid=$(awk -F: -v u="$login" '$1==u { print $4 }' "$passwd_file")
+   home=$(awk -F: -v u="$login" '$1==u { print $6 }' "$passwd_file")
+   [[ -n $home ]] || home=/home/$login
+fi
+
+keys=$tmpdir/keys
+: > "$keys"
+add_key_file() {
+   local file=$1
+   [[ -f $file ]] || return 0
+   while IFS= read -r line || [[ -n $line ]]; do
+      line=${line%$'\r'}
+      case $line in
+         ''|\#*) continue ;;
+         ssh-*|ecdsa-sha2-*|sk-ssh-*|sk-ecdsa-*) printf '%s\n' "$line" >> "$keys" ;;
+         *) log "skipping a line in $file that is not an SSH public key" ;;
+      esac
+   done < "$file"
+   consumed+=("$file")
+}
+
+add_key_file "$boot/authorized_keys"
+add_key_file "$boot/authorized_keys.txt"
+add_key_file "$boot/terra/authorized_keys"
+if [[ -f $toml/ssh.authorized_keys ]]; then
+   cat "$toml/ssh.authorized_keys" >> "$keys"
+fi
+if [[ -f $boot/user-data ]] && head -n 1 "$boot/user-data" | grep -q 'cloud-config'; then
+   awk '
+      /^ssh_authorized_keys:/ { grab = 1; next }
+      grab && /^[^ \t#-]/ { grab = 0 }
+      grab && /^[ \t]*-[ \t]/ {
+         sub(/^[ \t]*-[ \t]*/, "")
+         sub(/\r$/, "")
+         gsub(/^"|"$/, "")
+         print
+      }
+   ' "$boot/user-data" >> "$keys"
+   log "read ssh_authorized_keys from user-data"
+fi
+
+if [[ -s $keys && -n $uid && -n $gid ]]; then
+   if [[ $(id -u) -eq 0 ]]; then
+      install -d -m 0755 -o "$uid" -g "$gid" "${root}${home}"
+      install -d -m 0700 -o "$uid" -g "$gid" "${root}${home}/.ssh"
+   else
+      install -d -m 0755 "${root}${home}"
+      install -d -m 0700 "${root}${home}/.ssh"
+   fi
+   dest=${root}${home}/.ssh/authorized_keys
+   touch "$dest"
+   cat "$keys" >> "$dest"
+   awk 'NF && !seen[$0]++' "$dest" > "$dest.terra"
+   mv "$dest.terra" "$dest"
+   if [[ $(id -u) -eq 0 ]]; then
+      chown "$uid:$gid" "$dest" "${root}${home}/.ssh"
+   fi
+   chmod 0600 "$dest"
+   log "installed SSH public keys for $login"
+fi
+
+# A locked "!" password makes OpenSSH refuse public keys. "*" has no password.
+if [[ -f $shadow && -n $uid ]]; then
+   password_set=0
+   if hash=$(tval user.password); then
+      encrypted=$(tval user.password_encrypted || true)
+      new=
+      if [[ $encrypted == true ]]; then
+         case $hash in
+            \$*) new=$hash ;;
+            *) log "ignoring user.password that is not a crypt hash" ;;
+         esac
+      elif [[ -n $hash && -z $root ]]; then
+         new=$(openssl passwd -6 "$hash")
+      elif [[ -n $hash ]]; then
+         log "plain user.password is applied on the device, not during the image build"
+      fi
+      if [[ -n $new ]]; then
+         awk -F: -v OFS=: -v u="$login" -v p="$new" '$1==u { $2=p } { print }' "$shadow" > "$shadow.terra"
+         chmod --reference="$shadow" "$shadow.terra"
+         chown --reference="$shadow" "$shadow.terra" 2>/dev/null || true
+         mv "$shadow.terra" "$shadow"
+         password_set=1
+         log "set a password for $login from the boot partition"
+      fi
+   fi
+   if [[ $password_set -eq 0 ]]; then
+      awk -F: -v OFS=: -v u="$login" '
+         $1==u && ($2=="" || $2=="!" || $2=="!!" || $2=="*") { $2="*" }
+         { print }
+      ' "$shadow" > "$shadow.terra"
+      chmod --reference="$shadow" "$shadow.terra"
+      chown --reference="$shadow" "$shadow.terra" 2>/dev/null || true
+      mv "$shadow.terra" "$shadow"
+   fi
+fi
+
+ssh_on=0
+[[ $ssh_default != n ]] && ssh_on=1
+for marker in "$boot/ssh" "$boot/ssh.txt"; do
+   if [[ -f $marker ]]; then
+      ssh_on=1
+      consumed+=("$marker")
+   fi
+done
+if enabled=$(tval ssh.enabled); then
+   case $enabled in
+      true|yes|y|1) ssh_on=1 ;;
+      false|no|n|0) ssh_on=0 ;;
+   esac
+fi
+
+wants=$root/etc/systemd/system/multi-user.target.wants
+mkdir -p "$wants"
+if [[ $ssh_on -eq 1 ]]; then
+   if [[ -z $root ]]; then
+      systemctl enable ssh.service
+   else
+      # Relative target so an image check resolves the unit inside the rootfs.
+      ln -sfn ../../../../lib/systemd/system/ssh.service "$wants/ssh.service"
+   fi
+   pwauth=$(tval ssh.password_authentication || true)
+   drop=${root}/etc/ssh/sshd_config.d/99-terra-access.conf
+   mkdir -p "$(dirname "$drop")"
+   if [[ $pwauth == true && ${password_set:-0} -eq 1 ]]; then
+      cat > "$drop" << 'EOF'
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin no
+UsePAM yes
+EOF
+      log "password authentication enabled because custom.toml set a password"
+   fi
+else
+   rm -f "$wants/ssh.service" \
+      "$root/etc/systemd/system/sockets.target.wants/ssh.socket" \
+      "$wants/ssh.socket"
+   log "sshd left disabled"
+fi
+
+wifi_src=
+if [[ -f $boot/wpa_supplicant.conf ]]; then
+   wifi_src=$boot/wpa_supplicant.conf
+   consumed+=("$boot/wpa_supplicant.conf")
+elif [[ -f $boot/terra/wpa_supplicant.conf ]]; then
+   wifi_src=$boot/terra/wpa_supplicant.conf
+   consumed+=("$boot/terra/wpa_supplicant.conf")
+fi
+
+country=
+if [[ -n $wifi_src ]]; then
+   install -d -m 0755 "$root/etc/wpa_supplicant"
+   cat "$wifi_src" > "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+   chmod 0600 "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+   country=$(sed -n 's/^country=\([A-Za-z][A-Za-z]\).*/\1/p' "$wifi_src" | head -n 1)
+   log "installed wpa_supplicant.conf from the boot partition"
+elif ssid=$(tval wlan.ssid); then
+   psk=$(tval wlan.password || true)
+   encrypted=$(tval wlan.password_encrypted || true)
+   hidden=$(tval wlan.hidden || true)
+   country=$(tval wlan.country || true)
+   case $ssid in
+      *[$'\n"\\']*) log "Wi-Fi SSID contains a character this image will not write"; ssid= ;;
+   esac
+   case $psk in
+      *[$'\n"\\']*) log "Wi-Fi password contains a character this image will not write"; psk= ;;
+   esac
+   if [[ -n $ssid ]]; then
+      install -d -m 0755 "$root/etc/wpa_supplicant"
+      {
+         printf '%s\n' 'ctrl_interface=/run/wpa_supplicant' 'update_config=0'
+         if [[ $country =~ ^[A-Za-z]{2}$ ]]; then
+            printf 'country=%s\n' "$(printf '%s' "$country" | tr '[:lower:]' '[:upper:]')"
+         fi
+         printf '%s\n' 'network={' "	ssid=\"$ssid\""
+         if [[ -z $psk ]]; then
+            printf '%s\n' '	key_mgmt=NONE'
+         elif [[ $encrypted == true || $psk =~ ^[0-9a-fA-F]{64}$ ]]; then
+            printf '	psk=%s\n' "$psk"
+            printf '%s\n' '	key_mgmt=WPA-PSK'
+         else
+            printf '%s\n' "	psk=\"$psk\"" '	key_mgmt=WPA-PSK'
+         fi
+         [[ $hidden == true ]] && printf '%s\n' '	scan_ssid=1'
+         printf '%s\n' '}'
+      } > "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+      chmod 0600 "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+      log "installed Wi-Fi from custom.toml"
+   fi
+fi
+
+# Imager's systemd firstrun writes /etc/wpa_supplicant/wpa_supplicant.conf.
+# networkd on this image associates through wpa_supplicant@wlan0, which reads
+# wpa_supplicant-wlan0.conf. The D-Bus policy at
+# /etc/dbus-1/system.d/wpa_supplicant.conf is a different file.
+generic_wpa=$root/etc/wpa_supplicant/wpa_supplicant.conf
+wlan_wpa=$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+if [[ ! -f $wlan_wpa && -f $generic_wpa ]]; then
+   install -d -m 0755 "$root/etc/wpa_supplicant"
+   cat "$generic_wpa" > "$wlan_wpa"
+   chmod 0600 "$wlan_wpa"
+   if [[ -z ${country:-} ]]; then
+      country=$(sed -n 's/^country=\([A-Za-z][A-Za-z]\).*/\1/p' "$generic_wpa" | head -n 1)
+   fi
+   log "bridged Imager wpa_supplicant.conf onto wpa_supplicant-wlan0.conf"
+fi
+
+if [[ -f $root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf ]]; then
+   if [[ -z $root ]]; then
+      systemctl enable wpa_supplicant@wlan0.service
+      rfkill unblock wifi 2>/dev/null || true
+   else
+      ln -sfn ../../../../lib/systemd/system/wpa_supplicant@.service \
+         "$wants/wpa_supplicant@wlan0.service"
+   fi
+fi
+
+if [[ $country =~ ^[A-Za-z]{2}$ ]]; then
+   country=$(printf '%s' "$country" | tr '[:lower:]' '[:upper:]')
+   mkdir -p "$root/etc/modprobe.d"
+   printf 'options cfg80211 ieee80211_regdom=%s\n' "$country" \
+      > "$root/etc/modprobe.d/cfg80211_regdomain.conf"
+   if [[ -z $root ]]; then
+      iw reg set "$country" 2>/dev/null || true
+   fi
+fi
+
+if [[ ${#consumed[@]} -gt 0 ]]; then
+   for path in "${consumed[@]}"; do
+      rm -f "$path"
+   done
+fi
+if [[ -z $root ]]; then
+   sync
+fi

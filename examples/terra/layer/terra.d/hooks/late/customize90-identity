@@ -1,0 +1,125 @@
+#!/bin/bash
+# Runs after every layer's customize hooks. Scrub identity and secrets, enable
+# the Fusion HAT overlay, and apply optional lab-only Wi-Fi / SSH.
+set -euo pipefail
+
+root=${1:?customize hook requires the image root}
+cfg=$root/boot/firmware/config.txt
+[[ -f $cfg ]] || { echo "terra: missing $cfg" >&2; exit 1; }
+
+# Rebuild the overlay here if an earlier step replaced /boot/firmware.
+overlay=$root/boot/firmware/overlays/sunfounder-fusionhat.dtbo
+dts=$root/usr/src/fusion_hat-${IGconf_terra_fusion_driver_version:?}/sunfounder-fusionhat-overlay.dts
+if [[ ! -f $overlay ]]; then
+   [[ -f $dts ]] || { echo "terra: missing overlay source $dts" >&2; exit 1; }
+   mkdir -p "$root/boot/firmware/overlays"
+   chroot "$root" dtc -@ -I dts -O dtb \
+      -o /boot/firmware/overlays/sunfounder-fusionhat.dtbo \
+      "/usr/src/fusion_hat-${IGconf_terra_fusion_driver_version}/sunfounder-fusionhat-overlay.dts"
+fi
+
+# Fusion HAT config.txt lines, sshd, and an unlocked key-only pi account.
+# Lab images can still start with sshd off; the boot partition can turn it on.
+if [[ ${IGconf_terra_lab_ssh:-y} == n ]]; then
+   export TERRA_SSH_DEFAULT=n
+else
+   export TERRA_SSH_DEFAULT=y
+fi
+TERRA_ROOT=$root TERRA_BOOT=$root/boot/firmware \
+   "$root/usr/local/sbin/terra-boot-provision"
+unset TERRA_ROOT TERRA_BOOT TERRA_SSH_DEFAULT
+
+# Empty machine-id makes systemd generate a unique one on first boot.
+# A missing file would be a transient id, so keep a zero-length file.
+mkdir -p "$root/etc"
+: > "$root/etc/machine-id"
+chmod 0644 "$root/etc/machine-id"
+if [[ -L $root/var/lib/dbus/machine-id ]]; then
+   :
+else
+   rm -f "$root/var/lib/dbus/machine-id"
+fi
+
+# Host keys from the openssh postinst must not ship. ssh-hostkeys-generate
+# fills them in on first boot before sshd accepts connections.
+rm -f "$root"/etc/ssh/ssh_host_*
+
+rm -f "$root/var/lib/terra-rover/owner.json" \
+      "$root/var/lib/terra-rover/device-name.json"
+
+# Imager's user rename edits this exact filename. sudo ignores it unless the
+# mode is 0440, and git does not store that mode.
+if [[ -f $root/etc/sudoers.d/010_pi-nopasswd ]]; then
+   chmod 0440 "$root/etc/sudoers.d/010_pi-nopasswd"
+fi
+
+# Placeholder hostname. terra-firstboot replaces it from the Pi serial.
+printf '%s\n' terra > "$root/etc/hostname"
+if [[ -f $root/etc/hosts ]]; then
+   grep -v '127.0.1.1' "$root/etc/hosts" > "$root/etc/hosts.terra" || true
+   printf '%s\n' '127.0.1.1 terra' >> "$root/etc/hosts.terra"
+   mv "$root/etc/hosts.terra" "$root/etc/hosts"
+else
+   printf '%s\n' '127.0.1.1 terra' > "$root/etc/hosts"
+fi
+
+if [[ ${IGconf_terra_lab_ssh:-y} == n ]]; then
+   rm -f "$root/etc/systemd/system/multi-user.target.wants/ssh.service" \
+         "$root/etc/systemd/system/multi-user.target.wants/ssh.socket" \
+         "$root/etc/systemd/system/sockets.target.wants/ssh.socket"
+fi
+
+ssid=${IGconf_terra_lab_wifi_ssid:-}
+psk=${IGconf_terra_lab_wifi_psk:-}
+if [[ -n $ssid || -n $psk ]]; then
+   [[ -n $ssid && -n $psk ]] || {
+      echo "terra: lab Wi-Fi needs both lab_wifi_ssid and lab_wifi_psk" >&2
+      exit 1
+   }
+   case "$ssid$psk" in
+      *[$'\n"\\']*)
+         echo "terra: lab Wi-Fi values cannot contain quotes, backslashes, or newlines" >&2
+         exit 1
+         ;;
+   esac
+   install -d -m 0755 "$root/etc/wpa_supplicant"
+   cat > "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" << EOF
+ctrl_interface=/run/wpa_supplicant
+update_config=0
+country=US
+network={
+	ssid="$ssid"
+	psk="$psk"
+	key_mgmt=WPA-PSK
+}
+EOF
+   chmod 0600 "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+   mkdir -p "$root/etc/systemd/system/multi-user.target.wants"
+   ln -sfn /lib/systemd/system/wpa_supplicant@.service \
+      "$root/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service"
+else
+   rm -f "$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" \
+         "$root/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service"
+fi
+
+# The service command must keep Terra's safety defaults. PWM connectors are
+# the configured list; pairing still does not arm and there is no gate file.
+unit=$root/etc/systemd/system/terra-rover.service
+[[ -f $unit ]] || { echo "terra: missing $unit" >&2; exit 1; }
+grep -q -- '--button-pairing' "$unit"
+if grep -q -- '--gate-file' "$unit"; then
+   echo "terra: terra-rover.service must not set --gate-file" >&2
+   exit 1
+fi
+ports=${IGconf_terra_pwm_ports:-P0,P1,P2,P3,P4,P5}
+[[ $ports =~ ^(P([0-9]|1[01]))(,P([0-9]|1[01]))*$ ]] || {
+   echo "terra: pwm_ports must be a comma-separated list of P0 through P11" >&2
+   exit 1
+}
+envfile=$root/etc/terra-rover/rover.env
+[[ -f $envfile ]] || { echo "terra: missing $envfile" >&2; exit 1; }
+grep -v '^TERRA_PWM_PORTS=' "$envfile" > "$envfile.terra"
+printf 'TERRA_PWM_PORTS=%s\n' "$ports" >> "$envfile.terra"
+mv "$envfile.terra" "$envfile"
+chmod 0644 "$envfile"
+grep -q "^TERRA_PWM_PORTS=${ports}$" "$envfile"

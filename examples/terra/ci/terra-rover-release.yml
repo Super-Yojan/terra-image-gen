@@ -1,0 +1,58 @@
+# Copy this file to Super-Yojan/Terra as .github/workflows/terra-rover-release.yml
+# Tag the Terra repo rover-v<version> (for example rover-v0.2.0) to publish
+# terra-rover-<version>-linux-arm64.tar.gz and its .sha256 on GitHub Releases.
+name: Publish terra-rover release
+
+on:
+  push:
+    tags:
+      - "rover-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the Bookworm arm64 tarball
+        run: |
+          set -eu
+          docker buildx build --platform linux/arm64 \
+            -f packaging/rover/Dockerfile \
+            --output type=local,dest=hardware/raspberry-pi/dist .
+
+      - name: Publish the tarball and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' hardware/raspberry-pi/pyproject.toml)
+          tarball=$(echo hardware/raspberry-pi/dist/terra-rover-*-linux-arm64.tar.gz)
+          checksum="${tarball}.sha256"
+          test -f "$tarball"
+          test -f "$checksum"
+          sha256sum -c "$checksum"
+          tag="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
+            tag="rover-v${version}"
+          fi
+          notes=$(printf '%s\n' \
+            "terra-rover ${version} for 64-bit Raspberry Pi OS Bookworm or newer." \
+            "Verify with: sha256sum -c $(basename "$checksum")" \
+            "The image build in Super-Yojan/terra-image-gen consumes this tarball and hash.")
+          create_args=
+          if [ "${GITHUB_EVENT_NAME}" != workflow_dispatch ]; then
+            create_args=--verify-tag
+          fi
+          # shellcheck disable=SC2086
+          gh release create "$tag" "$tarball" "$checksum" \
+            --title "terra-rover ${version}" \
+            --notes "$notes" \
+            $create_args

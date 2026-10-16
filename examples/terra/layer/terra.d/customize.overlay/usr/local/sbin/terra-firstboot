@@ -1,0 +1,98 @@
+#!/bin/sh
+# Per-card identity, headless access from the FAT boot partition, and root
+# filesystem expansion. Runs once. Does not create an owner bond, a rover
+# BLE name, or SSH host keys. Wi-Fi and authorized_keys are installed only
+# from files the operator put on the boot partition.
+set -eu
+
+stamp=/var/lib/terra-image/firstboot-done
+[ -e "$stamp" ] && exit 0
+
+log() { echo "terra-firstboot: $*" >&2; }
+
+# sshd is already enabled in the image. This copies authorized_keys, Wi-Fi,
+# and custom.toml off the boot partition, and repairs Fusion HAT config.txt
+# lines if a flasher rewrote that file.
+/usr/local/sbin/terra-boot-provision
+
+if [ -e /var/lib/terra-image/fusion-config-changed ]; then
+    if [ ! -e /var/lib/terra-image/fusion-config-rebooted ]; then
+        mkdir -p /var/lib/terra-image
+        : > /var/lib/terra-image/fusion-config-rebooted
+        rm -f /var/lib/terra-image/fusion-config-changed
+        sync
+        log "rebooting so the Fusion HAT overlay is loaded"
+        reboot
+        exit 0
+    fi
+    rm -f /var/lib/terra-image/fusion-config-changed
+fi
+
+# Raspberry Pi Imager's firstrun.sh already wrote /etc/hostname. Keep that
+# name. The placeholder "terra" is the only hostname this script replaces.
+current=$(tr -d ' \t\n\r' < /etc/hostname 2>/dev/null || true)
+if [ "$current" = terra ] || [ -z "$current" ]; then
+    serial=
+    if [ -r /sys/firmware/devicetree/base/serial-number ]; then
+        serial=$(tr -d '\0' < /sys/firmware/devicetree/base/serial-number | tr 'A-F' 'a-f' | tr -cd '0-9a-f')
+    fi
+    if [ -n "$serial" ]; then
+        suffix=$(printf '%s' "$serial" | tail -c 6)
+    else
+        # QEMU and other hosts without a device-tree serial still need a unique name.
+        suffix=$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')
+        log "no Pi serial; using random hostname suffix"
+    fi
+    name="terra-$suffix"
+    printf '%s\n' "$name" > /etc/hostname
+    hostname "$name" 2>/dev/null || true
+    if [ -f /etc/hosts ]; then
+        grep -v '127.0.1.1' /etc/hosts > /etc/hosts.terra-new || true
+    else
+        : > /etc/hosts.terra-new
+    fi
+    printf '127.0.1.1 %s\n' "$name" >> /etc/hosts.terra-new
+    mv /etc/hosts.terra-new /etc/hosts
+    log "hostname $name"
+else
+    log "keeping hostname $current"
+fi
+
+root_src=$(findmnt -no SOURCE / 2>/dev/null || true)
+case "$root_src" in
+    /dev/*) ;;
+    *) log "root source '$root_src' is not a block device; skip grow"; root_src= ;;
+esac
+if [ -n "$root_src" ]; then
+    root_dev=$(readlink -f "$root_src" 2>/dev/null || true)
+    case "$root_dev" in
+        /dev/*) ;;
+        *) log "cannot resolve $root_src"; root_dev= ;;
+    esac
+fi
+if [ -n "${root_dev:-}" ]; then
+    devname=$(basename "$root_dev")
+    disk=$(lsblk -no PKNAME "$root_dev" 2>/dev/null | head -n 1 || true)
+    [ -n "$disk" ] || disk=$(printf '%s' "$devname" | sed -E 's/p?[0-9]+$//')
+    part=$(cat "/sys/class/block/$devname/partition" 2>/dev/null || true)
+    [ -n "$part" ] || part=$(printf '%s' "$devname" | sed -E 's/.*[^0-9]([0-9]+)$/\1/')
+    case "$part" in
+        ''|*[!0-9]*) log "partition '$part' is not numeric; skip grow" ;;
+        *)
+            if [ -z "$disk" ]; then
+                log "no parent disk for $root_dev; skip grow"
+            else
+                rc=0
+                growpart "/dev/$disk" "$part" || rc=$?
+                case "$rc" in
+                    0|1) resize2fs "$root_src"; log "root filesystem expanded on /dev/$disk partition $part" ;;
+                    *) log "growpart /dev/$disk $part failed ($rc); will retry"; exit 1 ;;
+                esac
+            fi
+            ;;
+    esac
+fi
+
+mkdir -p /var/lib/terra-image
+: > "$stamp"
+log "done"

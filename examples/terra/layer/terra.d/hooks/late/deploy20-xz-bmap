@@ -1,0 +1,24 @@
+#!/bin/bash
+# After the raw image is copied into the deploy directory, write .img.xz,
+# a bmap, and a copy of the in-image release manifest.
+set -euo pipefail
+
+dest=${1:?deploy hook requires the deploy directory}
+[[ -d $dest ]] || { echo "terra: deploy dir missing: $dest" >&2; exit 1; }
+
+shopt -s nullglob
+imgs=("$dest"/*.img)
+if [[ ${#imgs[@]} -eq 0 ]]; then
+   echo "terra: no .img in $dest" >&2
+   exit 1
+fi
+
+for img in "${imgs[@]}"; do
+   echo "terra: compressing $img"
+   xz -T0 -f -k "$img"
+   bmaptool create --output "${img}.bmap" "$img"
+done
+
+if [[ -n ${IGconf_target_path:-} && -f ${IGconf_target_path}/etc/terra-image-release ]]; then
+   cp -a "${IGconf_target_path}/etc/terra-image-release" "$dest/terra-image-release"
+fi

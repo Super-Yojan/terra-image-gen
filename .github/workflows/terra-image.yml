@@ -1,0 +1,81 @@
+name: terra-image
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: build and check Terra image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: checkout terra-image-gen
+        uses: actions/checkout@v4
+
+      - name: checkout pinned Terra
+        uses: actions/checkout@v4
+        with:
+          repository: Super-Yojan/Terra
+          ref: f08d0c15ebe2c585169d68448c42745d300cd9be
+          path: .terra-src
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: build terra-rover tarball
+        working-directory: .terra-src
+        run: |
+          set -eu
+          docker buildx build --platform linux/arm64 \
+            -f packaging/rover/Dockerfile \
+            --output type=local,dest=/tmp/terra-rover-dist .
+
+      - name: host dependencies
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support bmap-tools xz-utils mtools
+          sudo ./install_deps.sh
+
+      - name: fixture check
+        run: ./examples/terra/scripts/test-check-fixture.sh
+
+      - name: build image
+        run: |
+          set -eu
+          tarball=$(echo /tmp/terra-rover-dist/terra-rover-*-linux-arm64.tar.gz)
+          test -f "$tarball"
+          sha=$(sha256sum "$tarball" | awk '{print $1; exit}')
+          TERRA_ROVER_TARBALL="$tarball" TERRA_ROVER_SHA256="$sha" \
+            ./examples/terra/scripts/build-image.sh
+
+      - name: check image
+        run: |
+          set -eu
+          img=$(find work -type f -path '*/deploy-*/*.img' ! -name '*.img.xz' | head -n 1)
+          test -n "$img"
+          sudo ./examples/terra/scripts/check-image.sh --image "$img"
+
+      - name: qemu boot smoke
+        run: |
+          set -eu
+          img=$(find work -type f -path '*/deploy-*/*.img' ! -name '*.img.xz' | head -n 1)
+          sudo apt-get install -y qemu-system-arm
+          sudo ./examples/terra/scripts/qemu-boot-smoke.sh "$img" "$RUNNER_TEMP/qemu-boot.log" || test $? -eq 2
+          echo "qemu log follows"
+          cat "$RUNNER_TEMP/qemu-boot.log" || true
+
+      - name: upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: terra-bookworm-arm64
+          if-no-files-found: error
+          path: |
+            work/deploy-*/terra-bookworm-arm64.img.xz
+            work/deploy-*/terra-bookworm-arm64.img.bmap
+            work/deploy-*/terra-image-release

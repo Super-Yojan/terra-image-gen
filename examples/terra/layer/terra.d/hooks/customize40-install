@@ -1,0 +1,202 @@
+#!/bin/bash
+# Install the pinned Fusion HAT driver and the terra-rover bundle into the
+# image root. Accounts and service enablement are done here because
+# install.sh --root does not create them.
+set -euo pipefail
+
+root=${1:?customize hook requires the image root}
+[[ -d $root ]] || { echo "terra: not a directory: $root" >&2; exit 1; }
+
+fusion_commit=${IGconf_terra_fusion_commit:?}
+fusion_sha=${IGconf_terra_fusion_sha256:?}
+fusion_driver=${IGconf_terra_fusion_driver_version:?}
+fusion_lib=${IGconf_terra_fusion_version:?}
+rover_version=${IGconf_terra_rover_version:?}
+rover_sha=${IGconf_terra_rover_sha256:-}
+rover_url=${IGconf_terra_rover_url:-}
+rover_tarball=${IGconf_terra_rover_tarball:-}
+
+if [[ ! $rover_sha =~ ^[0-9a-f]{64}$ ]]; then
+   echo "terra: IGconf_terra_rover_sha256 must be a 64-digit sha256 (got '${rover_sha:-empty}')" >&2
+   echo "terra: pass TERRA_ROVER_TARBALL and TERRA_ROVER_SHA256 to examples/terra/scripts/build-image.sh" >&2
+   exit 1
+fi
+
+cache=${LAYER_WORKDIR:?}/cache
+mkdir -p "$cache"
+
+fetch_checked() {
+   local url=$1 dest=$2 sha=$3
+   if [[ -f $dest ]] && echo "$sha  $dest" | sha256sum -c - >/dev/null; then
+      echo "terra: using cached $dest"
+      return 0
+   fi
+   echo "terra: downloading $url"
+   curl --fail --location --retry 5 --retry-delay 2 --output "$dest.partial" "$url"
+   mv -f "$dest.partial" "$dest"
+   echo "$sha  $dest" | sha256sum -c -
+}
+
+fusion_tar=$cache/fusion-hat-$fusion_commit.tar.gz
+fetch_checked \
+   "https://codeload.github.com/sunfounder/fusion-hat/tar.gz/$fusion_commit" \
+   "$fusion_tar" "$fusion_sha"
+
+if [[ -n $rover_tarball ]]; then
+   [[ -f $rover_tarball ]] || { echo "terra: rover tarball not found: $rover_tarball" >&2; exit 1; }
+   rover_file=$(realpath "$rover_tarball")
+   echo "$rover_sha  $rover_file" | sha256sum -c -
+else
+   [[ -n $rover_url ]] || { echo "terra: set rover_url or rover_tarball" >&2; exit 1; }
+   rover_file=$cache/terra-rover-$rover_version-linux-arm64.tar.gz
+   fetch_checked "$rover_url" "$rover_file" "$rover_sha"
+fi
+
+# Driver sources only. The vendor install.sh also pulls the audio/voice stack;
+# we never run it. DKMS keeps the module rebuildable for later kernel updates.
+top=$(tar -tzf "$fusion_tar" | awk -F/ 'NR==1 { print $1; exit }')
+[[ -n $top ]] || { echo "terra: empty fusion-hat archive" >&2; exit 1; }
+rm -rf "$cache/fusion-src"
+mkdir -p "$cache/fusion-src"
+tar -xzf "$fusion_tar" -C "$cache/fusion-src" "$top/driver" "$top/LICENSE"
+src=$root/usr/src/fusion_hat-$fusion_driver
+rm -rf "$src"
+mkdir -p "$src"
+cp -a "$cache/fusion-src/$top/driver/"*.c \
+      "$cache/fusion-src/$top/driver/"*.h \
+      "$cache/fusion-src/$top/driver/Makefile" \
+      "$cache/fusion-src/$top/driver/dkms.conf" \
+      "$cache/fusion-src/$top/driver/"*.dts \
+      "$src/"
+cp -a "$cache/fusion-src/$top/LICENSE" "$src/LICENSE"
+# Record the commit next to the GPL sources retained in the image.
+printf '%s\n' "$fusion_commit" > "$src/FUSION_HAT_COMMIT"
+
+# DKMS and the kernel build look at /proc, /sys, and /dev. Mount only what
+# mmdebstrap has not already mounted, and drop those mounts before returning
+# so the rootfs can be unmounted later.
+dkms_mounts=()
+mount_into() {
+   local dest=$1 kind=$2
+   mkdir -p "$dest"
+   if mountpoint -q "$dest"; then
+      return 0
+   fi
+   case $kind in
+      proc) mount -t proc proc "$dest" ;;
+      sysfs) mount -t sysfs sysfs "$dest" ;;
+      dev) mount --bind /dev "$dest" ;;
+   esac || return 1
+   dkms_mounts+=("$dest")
+}
+cleanup_dkms_mounts() {
+   local i
+   for ((i=${#dkms_mounts[@]}-1; i>=0; i--)); do
+      umount "${dkms_mounts[i]}" || true
+   done
+}
+trap cleanup_dkms_mounts EXIT
+mount_into "$root/proc" proc
+mount_into "$root/sys" sysfs || echo "terra: warning: could not mount sysfs in the image" >&2
+mount_into "$root/dev" dev || echo "terra: warning: could not bind-mount /dev in the image" >&2
+mkdir -p "$root/tmp"
+
+cat > "$root/tmp/terra-dkms.sh" << EOF
+#!/bin/bash
+set -euo pipefail
+ver=$fusion_driver
+dkms add -m fusion_hat -v "\$ver"
+built=0
+for kdir in /lib/modules/*; do
+   [[ -d \$kdir ]] || continue
+   kver=\$(basename "\$kdir")
+   if [[ -f \$kdir/build/Makefile ]]; then
+      echo "terra: DKMS build fusion_hat \$ver for \$kver"
+      dkms build -m fusion_hat -v "\$ver" -k "\$kver"
+      dkms install -m fusion_hat -v "\$ver" -k "\$kver"
+      built=1
+   else
+      echo "terra: skip \$kver (no kernel headers)"
+   fi
+done
+[[ \$built -eq 1 ]] || { echo "terra: DKMS built no kernels" >&2; exit 1; }
+mkdir -p /boot/firmware/overlays
+dtc -@ -I dts -O dtb \
+   -o /boot/firmware/overlays/sunfounder-fusionhat.dtbo \
+   /usr/src/fusion_hat-\$ver/sunfounder-fusionhat-overlay.dts
+EOF
+chmod 0755 "$root/tmp/terra-dkms.sh"
+chroot "$root" /tmp/terra-dkms.sh
+rm -f "$root/tmp/terra-dkms.sh"
+
+bundle=$cache/rover-unpacked
+rm -rf "$bundle"
+mkdir -p "$bundle"
+tar -xzf "$rover_file" -C "$bundle"
+rover_dir=$(find "$bundle" -mindepth 1 -maxdepth 1 -type d -name 'terra-rover-*-linux-arm64' | head -n 1)
+[[ -n $rover_dir && -f $rover_dir/install.sh ]] || {
+   echo "terra: tarball has no terra-rover-*-linux-arm64/install.sh" >&2
+   exit 1
+}
+sh "$rover_dir/install.sh" --root "$root"
+
+# install.sh --root does not create accounts or enable the unit.
+chroot "$root" /bin/bash -eu -c '
+   getent group terra-rover >/dev/null || groupadd --system terra-rover
+   if ! id terra-rover >/dev/null 2>&1; then
+      useradd --system --gid terra-rover --home-dir /var/lib/terra-rover \
+         --no-create-home --shell /usr/sbin/nologin terra-rover
+   fi
+   getent group i2c >/dev/null || groupadd --system i2c
+   getent group bluetooth >/dev/null || groupadd --system bluetooth
+   usermod --append --groups i2c,bluetooth terra-rover
+   install -d -m 0700 -o terra-rover -g terra-rover /var/lib/terra-rover
+'
+# No owner bond and no generated rover name in the image.
+rm -f "$root/var/lib/terra-rover/owner.json" \
+      "$root/var/lib/terra-rover/device-name.json" \
+      "$root/var/lib/terra-rover/layout.json"
+
+mkdir -p "$root/etc/systemd/system/multi-user.target.wants" \
+         "$root/etc/systemd/system/sysinit.target.wants"
+ln -sfn ../terra-rover.service \
+   "$root/etc/systemd/system/multi-user.target.wants/terra-rover.service"
+ln -sfn ../terra-firstboot.service \
+   "$root/etc/systemd/system/sysinit.target.wants/terra-firstboot.service"
+ln -sfn ../terra-firstboot.service \
+   "$root/etc/systemd/system/multi-user.target.wants/terra-firstboot.service"
+
+k2712=$(chroot "$root" dpkg-query -W -f '${Version}' linux-image-rpi-2712 2>/dev/null || true)
+kv8=$(chroot "$root" dpkg-query -W -f '${Version}' linux-image-rpi-v8 2>/dev/null || true)
+h2712=$(chroot "$root" dpkg-query -W -f '${Version}' linux-headers-rpi-2712 2>/dev/null || true)
+hv8=$(chroot "$root" dpkg-query -W -f '${Version}' linux-headers-rpi-v8 2>/dev/null || true)
+# sudo builds trip git's safe.directory check when the repo is not root-owned.
+gitrev=$(git -c safe.directory='*' -C "${IGTOP:-.}" rev-parse HEAD 2>/dev/null || echo unknown)
+
+install -d -m 0755 "$root/etc"
+cat > "$root/etc/terra-image-release" << EOF
+TERRA_IMAGE_NAME=${IGconf_image_name:-terra-bookworm-arm64}
+TERRA_SUITE=bookworm
+TERRA_DEVICES=pi4,pi5
+TERRA_PAGE_SIZE=4096
+TERRA_FUSION_COMMIT=$fusion_commit
+TERRA_FUSION_SHA256=$fusion_sha
+TERRA_FUSION_VERSION=$fusion_lib
+TERRA_FUSION_DRIVER_VERSION=$fusion_driver
+TERRA_ROVER_VERSION=$rover_version
+TERRA_ROVER_SHA256=$rover_sha
+TERRA_ROVER_URL=$rover_url
+TERRA_ROVER_TARBALL_BASENAME=$(basename "$rover_file")
+LINUX_IMAGE_RPI_2712=$k2712
+LINUX_IMAGE_RPI_V8=$kv8
+LINUX_HEADERS_RPI_2712=$h2712
+LINUX_HEADERS_RPI_V8=$hv8
+TERRA_GIT_REF=${IGconf_terra_source_ref:-}
+IMAGE_GIT=$gitrev
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-}
+TERRA_PWM_PORTS=${IGconf_terra_pwm_ports:-P0,P1,P2,P3,P4,P5}
+LAB_SSH=${IGconf_terra_lab_ssh:-y}
+LAB_WIFI=$([[ -n ${IGconf_terra_lab_wifi_ssid:-} ]] && echo set || echo unset)
+EOF
+chmod 0644 "$root/etc/terra-image-release"
+echo "terra: staged fusion_hat $fusion_driver and terra-rover $rover_version"

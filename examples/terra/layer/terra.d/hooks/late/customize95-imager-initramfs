@@ -1,0 +1,57 @@
+#!/bin/bash
+# The kernel postinst builds initramfs before this layer's overlay is in
+# place. Rebuild every initramfs so terra-imager-fixup is on the boot
+# partition that genimage copies.
+set -euo pipefail
+
+root=${1:?customize hook requires the image root}
+script=$root/etc/initramfs-tools/scripts/local-bottom/terra-imager-fixup
+hook=$root/etc/initramfs-tools/hooks/terra-imager-fixup
+[[ -f $script && -f $hook ]] || { echo "terra: imager initramfs files missing" >&2; exit 1; }
+chmod 0755 "$script" "$hook"
+
+mounted=()
+cleanup() {
+   local i
+   for ((i=${#mounted[@]}-1; i>=0; i--)); do
+      umount "${mounted[i]}" || true
+   done
+}
+trap cleanup EXIT
+
+mount_one() {
+   local dest=$1
+   shift
+   mkdir -p "$dest"
+   if mountpoint -q "$dest"; then
+      return 0
+   fi
+   if "$@" "$dest"; then
+      mounted+=("$dest")
+   else
+      echo "terra: warning: could not mount $dest" >&2
+      return 1
+   fi
+}
+
+mount_one "$root/proc" mount -t proc proc
+mount_one "$root/sys" mount -t sysfs sysfs || true
+mount_one "$root/dev" mount --bind /dev || true
+mkdir -p "$root/tmp"
+chmod 1777 "$root/tmp" || true
+
+copied_qemu=0
+if [[ ! -e $root/usr/bin/qemu-aarch64-static && -x /usr/bin/qemu-aarch64-static ]]; then
+   cp -a /usr/bin/qemu-aarch64-static "$root/usr/bin/qemu-aarch64-static"
+   copied_qemu=1
+fi
+
+chroot "$root" update-initramfs -u -k all
+
+if [[ $copied_qemu -eq 1 ]]; then
+   rm -f "$root/usr/bin/qemu-aarch64-static"
+fi
+
+install -d -m 0755 "$root/var/lib/terra-image"
+printf '%s\n' terra-imager-fixup > "$root/var/lib/terra-image/imager-initramfs"
+echo "terra: rebuilt initramfs with the Imager firstrun fixup"

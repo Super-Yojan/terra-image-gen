@@ -1,0 +1,16 @@
+[Unit]
+Description=Terra headless access, hostname, and root filesystem expansion
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target systemd-hostnamed.service ssh.service ssh.socket
+Wants=network-pre.target
+ConditionPathExists=!/var/lib/terra-image/firstboot-done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/terra-firstboot
+
+[Install]
+WantedBy=sysinit.target
+WantedBy=multi-user.target
