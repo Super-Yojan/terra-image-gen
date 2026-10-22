@@ -1,0 +1,120 @@
+#!/bin/bash
+# Configure independent USB SSH and a protected, local-only Wi-Fi hotspot.
+set -euo pipefail
+export LC_ALL=C
+umask 077
+root=${TERRA_ROOT:-}
+boot=${TERRA_BOOT:-${root}/boot/firmware}
+configure_only=0
+case ${1:-} in --configure-only) configure_only=1 ;; '') ;; *) echo 'unsupported argument' >&2; exit 2 ;; esac
+fail() { echo "terra-network: $*" >&2; exit 1; }
+[[ -z $root || $configure_only == 1 ]] || fail 'alternate root requires --configure-only'
+config=$root/etc/terra-image/network.conf
+# USB recovery is independent of all Wi-Fi settings, including invalid inputs.
+install -d -m755 "$root/etc/systemd/network"
+serial=
+if [[ -r $root/proc/device-tree/serial-number ]]; then
+ serial=$(tr -d '\0' < "$root/proc/device-tree/serial-number" | tr -cd '0-9a-fA-F' | tr 'A-F' 'a-f')
+fi
+if [[ -z $serial && -r $root/etc/machine-id ]]; then serial=$(tr -cd '0-9a-f' < "$root/etc/machine-id"); fi
+if [[ -z $serial ]]; then
+ install -d -m700 "$root/var/lib/terra-image"
+ seed=$root/var/lib/terra-image/network-id
+ [[ -s $seed ]] || openssl rand -hex 8 > "$seed"
+ serial=$(cat "$seed")
+fi
+cat > "$root/etc/systemd/network/00-terra-usb.network" <<'EOF'
+[Match]
+Name=usb0
+[Network]
+Address=192.168.77.1/30
+DHCPServer=yes
+LinkLocalAddressing=ipv6
+IPv6AcceptRA=no
+[DHCPServer]
+PoolOffset=2
+PoolSize=1
+EmitDNS=no
+EmitRouter=no
+EOF
+chmod 644 "$root/etc/systemd/network/00-terra-usb.network"
+if [[ $configure_only == 0 ]]; then
+ model=$(tr -d '\0' < /proc/device-tree/model)
+ case $model in
+  *'Raspberry Pi 4'*|*'Compute Module 4'*)
+   digest=$(printf '%s' "$serial" | sha256sum);digest=${digest%% *}
+   suffix=${digest:0:2}:${digest:2:2}:${digest:4:2}:${digest:6:2}
+   # Load after identity generation so the Mac sees stable Ethernet addresses.
+   modprobe g_ether "host_addr=02:54:$suffix" "dev_addr=02:55:$suffix" || echo "terra-network: USB gadget unavailable; hotspot setup continues" >&2
+   ;;
+ esac
+fi
+# A rejected Wi-Fi configuration must never leave an old hotspot enabled.
+rm -f "$root/etc/systemd/network/00-terra-hotspot.network" "$root/var/lib/terra-image/hotspot-mode" "$root/etc/hostapd/hostapd.conf"
+mode=hotspot
+country=US
+ssid=
+passphrase=
+read_config() {
+ local line key value
+ while IFS= read -r line || [[ -n $line ]]; do
+  line=${line%$'\r'}
+  case $line in ''|\#*) continue ;; esac
+  [[ $line == *=* ]] || fail 'invalid configuration line'
+  key=${line%%=*}; value=${line#*=}
+  case $key in
+   WIFI_MODE) mode=$value ;;
+   HOTSPOT_COUNTRY) country=$value ;;
+   HOTSPOT_SSID) ssid=$value ;;
+   HOTSPOT_PASSPHRASE) passphrase=$value ;;
+   *) fail 'unknown network configuration key' ;;
+  esac
+ done < "$1"
+}
+[[ ! -f $config ]] || read_config "$config"
+provision=$boot/terra-network.conf
+[[ ! -f $provision ]] || read_config "$provision"
+[[ $mode == hotspot || $mode == client ]] || fail 'WIFI_MODE must be hotspot or client'
+[[ $country =~ ^[A-Z]{2}$ ]] || fail 'HOTSPOT_COUNTRY must be a two-letter country code'
+[[ -n $ssid ]] || ssid=Terra-${serial: -6}
+[[ ${#ssid} -ge 1 && ${#ssid} -le 32 ]] || fail 'hotspot SSID must contain 1 to 32 bytes'
+[[ -n $passphrase ]] || passphrase=$(openssl rand -hex 12)
+[[ ${#passphrase} -ge 8 && ${#passphrase} -le 63 && $passphrase =~ ^[[:print:]]+$ ]] || fail 'hotspot passphrase must contain 8 to 63 bytes on one line'
+# Never source or evaluate operator-supplied configuration.
+install -d -m755 "$root/etc/terra-image" "$root/etc/systemd/network" "$root/etc/hostapd"
+install -d -m700 "$root/var/lib/terra-image"
+{
+ printf 'WIFI_MODE=%s\nHOTSPOT_COUNTRY=%s\nHOTSPOT_SSID=%s\nHOTSPOT_PASSPHRASE=%s\n' "$mode" "$country" "$ssid" "$passphrase"
+} > "$config.tmp"
+chmod 600 "$config.tmp"
+mv "$config.tmp" "$config"
+if [[ $mode == hotspot ]]; then
+ cat > "$root/etc/systemd/network/00-terra-hotspot.network" <<'EOF'
+[Match]
+Name=wlan0
+[Network]
+Address=192.168.78.1/24
+DHCPServer=yes
+LinkLocalAddressing=ipv6
+IPv6AcceptRA=no
+[DHCPServer]
+PoolOffset=10
+PoolSize=100
+EmitDNS=no
+EmitRouter=no
+EOF
+ {
+  printf 'interface=wlan0\ndriver=nl80211\ncountry_code=%s\nssid=%s\n' "$country" "$ssid"
+  printf '%s\n' 'hw_mode=g' 'channel=6' 'ieee80211n=1' 'wmm_enabled=1' 'auth_algs=1' 'wpa=2' 'wpa_key_mgmt=WPA-PSK' 'rsn_pairwise=CCMP'
+  printf 'wpa_passphrase=%s\n' "$passphrase"
+ } > "$root/etc/hostapd/hostapd.conf"
+ chmod 600 "$root/etc/hostapd/hostapd.conf"
+ : > "$root/var/lib/terra-image/hotspot-mode"
+else
+ rm -f "$root/etc/systemd/network/00-terra-hotspot.network" "$root/var/lib/terra-image/hotspot-mode" "$root/etc/hostapd/hostapd.conf"
+fi
+chmod 644 "$root/etc/systemd/network/00-terra-usb.network"
+[[ ! -f $root/etc/systemd/network/00-terra-hotspot.network ]] || chmod 644 "$root/etc/systemd/network/00-terra-hotspot.network"
+# Provisioning is consumed only after validated configuration is durable.
+[[ ! -f $provision ]] || rm -f "$provision"
+printf 'terra-network: mode=%s ssid=%s USB=192.168.77.1 hotspot=192.168.78.1\n' "$mode" "$ssid"

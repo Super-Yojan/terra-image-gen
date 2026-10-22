@@ -53,6 +53,49 @@ Outputs (names follow the artefact version directory):
 - `terra-rover` from `install.sh --root`, user `terra-rover` in groups `i2c` and `bluetooth`, `/var/lib/terra-rover` mode 0700 owned by that user, `terra-rover.service` enabled.
 - Safety defaults from Terra: button pairing, no `--gate-file`, battery cutoff left external. Pairing does not arm. `TERRA_PWM_PORTS` defaults to `P0,P1,P2,P3,P4,P5` (`terra.pwm_ports`). P4 and P5 are also motor M3's pins, so one layout cannot use M3 together with P4 or P5.
 
+## Direct connections: USB and the Terra hotspot
+
+New builds enable both independent access paths. On a Pi 4, connect the USB-C
+data port to your Mac with a data cable; USB-A ports remain host ports. The Pi
+serves one USB DHCP lease and accepts SSH at `192.168.77.1`. Gadget Ethernet
+addresses are derived from the Pi identity and remain stable across boots.
+
+At every boot the Pi creates a 2.4 GHz WPA2 hotspot named `Terra-` followed by its
+serial suffix. Join it from a phone or computer, then use SSH at `192.168.78.1`.
+The image retains its systemd-networkd/wpa_supplicant stack; hotspot mode prevents
+the Wi-Fi client service from competing for the same radio. SSH uses the same
+provisioned key/password on both links. Pi 5 does not gain a USB-C data path from
+this change; its hotspot remains available.
+
+The hotspot is a local connection and does not advertise an internet gateway or
+DNS server. In hotspot mode, Pi uploads need Ethernet or the Mac USB log relay;
+otherwise logs remain queued. Saved Wi-Fi client credentials are preserved.
+
+The single operator configuration is `/etc/terra-image/network.conf` (root-only).
+To provision it while flashing, put a `terra-network.conf` on the FAT boot
+partition, with unquoted literal values:
+
+```text
+WIFI_MODE=hotspot
+HOTSPOT_COUNTRY=US
+HOTSPOT_SSID=
+HOTSPOT_PASSPHRASE=choose-a-private-password
+```
+
+Set the regulatory country for your location. An empty SSID uses the Pi identity.
+The boot file is validated, copied into the protected root configuration, and
+removed from FAT. A missing passphrase generates a unique 24-character password
+on the device; retrieve it through USB SSH from the root-only configuration.
+There is no shared default password. Do not publish an image containing your
+provisioning file or an initialized network configuration.
+
+To use a saved Wi-Fi client network instead, set `WIFI_MODE=client` in that same
+configuration and reboot. USB SSH remains available. To return to the hotspot,
+set `WIFI_MODE=hotspot` and reboot. No rover arming or motion setting changes.
+
+Run `examples/terra/scripts/test-network-setup.sh` for fixture tests of protected
+AP generation, USB addressing, repeat boots, mode changes and safe secret parsing.
+
 ## First boot
 
 `terra-firstboot.service` copies headless-access files off the FAT boot partition, sets the hostname to `terra-` plus the last six hex digits of the Pi serial (or a random suffix when no serial exists), and grows the root filesystem to the card. systemd generates `machine-id` because the file ships empty. SSH host keys are absent from the image; `ssh-hostkeys-generate.service` creates a new set before sshd listens. `terra-rover` generates `terra-XXXXXX` itself the first time it can write `/var/lib/terra-rover/device-name.json`. That file is not in the image.

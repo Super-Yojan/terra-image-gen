@@ -65,7 +65,17 @@ if [[ -n $image ]]; then
          xz -dc "$image" > "$raw"
          ;;
    esac
-   loop=$(sudo losetup --read-only --find --show --partscan "$raw")
+   # Execution checks need a writable scratch root for the onefile runtime.
+   # Never remount the release artifact writable or change its verified hash.
+   if [[ $skip_exec -eq 0 ]]; then
+      if [[ $raw == "$image" ]]; then
+         raw=$tmpdir/image.img
+         cp --reflink=auto "$image" "$raw"
+      fi
+      loop=$(sudo losetup --find --show --partscan "$raw")
+   else
+      loop=$(sudo losetup --read-only --find --show --partscan "$raw")
+   fi
    # Some kernels do not create partition nodes from --partscan alone.
    for _ in 1 2 3 4 5 6 7 8 9 10; do
       [[ -b ${loop}p1 && -b ${loop}p2 ]] && break
@@ -92,6 +102,9 @@ if [[ -n $image ]]; then
       mkdir -p "$bootfs/overlays"
       MTOOLS_SKIP_CHECK=1 mcopy -n -i "$fat" ::/overlays/sunfounder-fusionhat.dtbo "$bootfs/overlays/"
       MTOOLS_SKIP_CHECK=1 mcopy -n -i "$fat" ::/initramfs8 "$bootfs/initramfs8"
+      if MTOOLS_SKIP_CHECK=1 mdir -i "$fat" ::/terra-network.conf >/dev/null 2>&1; then
+         MTOOLS_SKIP_CHECK=1 mcopy -i "$fat" ::/terra-network.conf "$bootfs/terra-network.conf"
+      fi
       echo "ok: boot partition read with mtools (vfat is not mountable here)"
    fi
    cleanup_mount=1
@@ -177,6 +190,11 @@ if [[ $allow_lab -eq 0 ]]; then
       find "$root/home" "$root/root" "$root/etc" -name 'authorized_keys' -size +0c -print 2>/dev/null || true
    fi)
    [[ -z $keys ]] || fail "authorized_keys is not empty: $keys"
+   for credentials in "$root/etc/terra-image/network.conf" "$root/etc/hostapd/hostapd.conf" "$bootfs/terra-network.conf"; do
+      if exists "$credentials" && readf "$credentials" | grep -Eq '^(HOTSPOT_PASSPHRASE|wpa_passphrase|wpa_psk)=.+'; then
+         fail "hotspot credentials baked in: $credentials"
+      fi
+   done
    ok "no Wi-Fi credentials, password hashes, or SSH public keys"
 fi
 
