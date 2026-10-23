@@ -1,0 +1,11 @@
+[Unit]
+Description=Try saved Wi-Fi, then start the Terra hotspot
+After=terra-network-setup.service systemd-networkd.service
+ConditionPathExists=/var/lib/terra-image/wifi-fallback
+ConditionPathExists=!/var/lib/terra-image/hotspot-mode
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/terra-wifi-fallback
+Restart=no
+[Install]
+WantedBy=multi-user.target

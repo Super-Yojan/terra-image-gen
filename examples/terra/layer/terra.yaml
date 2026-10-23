@@ -113,6 +113,9 @@ mmdebstrap:
     - cloud-guest-utils
     - e2fsprogs
     - wpasupplicant
+    - hostapd
+    - avahi-daemon
+    - openssl
     - iw
     - rfkill
     - tzdata

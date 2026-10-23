@@ -54,7 +54,8 @@ fi
 
 # Driver sources only. The vendor install.sh also pulls the audio/voice stack;
 # we never run it. DKMS keeps the module rebuildable for later kernel updates.
-top=$(tar -tzf "$fusion_tar" | awk -F/ 'NR==1 { print $1; exit }')
+# Do not exit awk early. gawk then closes the pipe and tar dies with SIGPIPE (141).
+top=$(tar -tzf "$fusion_tar" | awk -F/ 'NR==1 { name=$1 } END { print name }')
 [[ -n $top ]] || { echo "terra: empty fusion-hat archive" >&2; exit 1; }
 rm -rf "$cache/fusion-src"
 mkdir -p "$cache/fusion-src"
@@ -133,7 +134,7 @@ bundle=$cache/rover-unpacked
 rm -rf "$bundle"
 mkdir -p "$bundle"
 tar -xzf "$rover_file" -C "$bundle"
-rover_dir=$(find "$bundle" -mindepth 1 -maxdepth 1 -type d -name 'terra-rover-*-linux-arm64' | head -n 1)
+rover_dir=$(find "$bundle" -mindepth 1 -maxdepth 1 -type d -name 'terra-rover-*-linux-arm64' -print -quit)
 [[ -n $rover_dir && -f $rover_dir/install.sh ]] || {
    echo "terra: tarball has no terra-rover-*-linux-arm64/install.sh" >&2
    exit 1

@@ -43,7 +43,10 @@ jobs:
           sudo ./install_deps.sh
 
       - name: fixture check
-        run: ./examples/terra/scripts/test-check-fixture.sh
+        run: |
+          ./examples/terra/scripts/test-check-fixture.sh
+          ./examples/terra/scripts/test-boot-provision.sh
+          ./examples/terra/scripts/test-network-setup.sh
 
       - name: build image
         run: |

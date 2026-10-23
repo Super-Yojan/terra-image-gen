@@ -1,0 +1,6 @@
+[Unit]
+Description=Stop the Terra hotspot and retry saved Wi-Fi
+After=terra-network-setup.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/terra-wifi-retry

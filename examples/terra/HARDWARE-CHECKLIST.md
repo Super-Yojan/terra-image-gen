@@ -37,6 +37,15 @@ Run this on a Pi 4 and a Pi 5, each with a Fusion HAT, an external battery cutof
 - [ ] TerraPhone can find that `terra-XXXXXX` name and complete enrollment. Three LED flashes, then the LED stays on after reconnect.
 - [ ] Motors stay off through enrollment. Arming still requires an explicit arm and a layout. There is no gate file.
 
+## USB SSH and Wi-Fi fallback
+
+- [ ] On a Pi 4, SSH to `192.168.77.1` works over the USB-C data port while Wi-Fi is disconnected. A Pi 5 has no USB gadget path.
+- [ ] With a saved network in range, the Pi joins it and does not raise the Terra hotspot.
+- [ ] With no saved network, or with the access point out of range, the `Terra-` hotspot appears after about `WIFI_CONNECT_TIMEOUT` seconds (default 30). SSH to `192.168.78.1` works.
+- [ ] Disconnecting the client network raises the hotspot after about `WIFI_RETRY_TIMEOUT` seconds (default 15). It stays up; the Pi does not return to the client on its own.
+- [ ] From USB SSH, `sudo terra-wifi-retry` drops the hotspot and tries saved Wi-Fi again. USB SSH still answers during the retry.
+- [ ] Editing `WIFI_CONNECT_TIMEOUT` or `WIFI_RETRY_TIMEOUT` in `/etc/terra-image/network.conf` changes the wait on the next attempt. No other file sets those values.
+
 ## Failures to record
 
 Write the Pi model, kernel release (`uname -r`), image manifest, and what failed. A missing `/sys/class/fusion_hat` with the overlay enabled is a driver or HAT problem, not a successful test.

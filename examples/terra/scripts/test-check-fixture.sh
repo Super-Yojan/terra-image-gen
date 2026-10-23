@@ -109,4 +109,21 @@ if "$check" --root "$bad3" --skip-exec; then
    exit 1
 fi
 
+for secret in root-config hostapd boot-config; do
+   target=$tmp/secret-$secret
+   cp -a "$good" "$target"
+   case $secret in
+      root-config) path=$target/etc/terra-image/network.conf; value=HOTSPOT_PASSPHRASE=private-test-password ;;
+      hostapd) path=$target/etc/hostapd/hostapd.conf; value=wpa_passphrase=private-test-password ;;
+      boot-config) path=$target/boot/firmware/terra-network.conf; value=HOTSPOT_PASSPHRASE=private-test-password ;;
+   esac
+   mkdir -p "$(dirname "$path")"
+   printf '%s\n' "$value" > "$path"
+   if "$check" --root "$target" --skip-exec; then
+      echo "fixture: hotspot credential source $secret was accepted" >&2
+      exit 1
+   fi
+done
+printf 'HOTSPOT_PASSPHRASE=\n' > "$good/etc/terra-image/network.conf"
+"$check" --root "$good" --skip-exec
 echo "fixture checks passed"

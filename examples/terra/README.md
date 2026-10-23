@@ -53,6 +53,75 @@ Outputs (names follow the artefact version directory):
 - `terra-rover` from `install.sh --root`, user `terra-rover` in groups `i2c` and `bluetooth`, `/var/lib/terra-rover` mode 0700 owned by that user, `terra-rover.service` enabled.
 - Safety defaults from Terra: button pairing, no `--gate-file`, battery cutoff left external. Pairing does not arm. `TERRA_PWM_PORTS` defaults to `P0,P1,P2,P3,P4,P5` (`terra.pwm_ports`). P4 and P5 are also motor M3's pins, so one layout cannot use M3 together with P4 or P5.
 
+## Direct connections: USB and the Terra hotspot
+
+USB SSH stays up for the whole boot, whether or not Wi-Fi or the hotspot is up.
+On a Pi 4, connect the USB-C data port to your Mac with a data cable; USB-A
+ports remain host ports. The Pi serves one USB DHCP lease and accepts SSH at
+`192.168.77.1`. Gadget Ethernet addresses are derived from the Pi identity and
+remain stable across boots. Pi 5 does not gain a USB-C data path from this
+change. SSH uses the same provisioned key or password on USB, Ethernet, and the
+hotspot.
+
+At boot the Pi tries its saved Wi-Fi networks first. Those are the networks
+installed from the boot partition or Raspberry Pi Imager, in the section below.
+The built-in radio is the systemd-networkd and wpa_supplicant client. If none
+of the saved networks connect within `WIFI_CONNECT_TIMEOUT` seconds (30 by
+default), the Pi starts a 2.4 GHz WPA2 hotspot named `Terra-` followed by its
+serial suffix. Join it from a phone or computer, then use SSH at `192.168.78.1`.
+
+If that client connection drops while the Pi is running, wpa_supplicant keeps
+trying for `WIFI_RETRY_TIMEOUT` seconds (15 by default). When the window ends,
+the hotspot starts. The hotspot then stays up. The Pi does not probe client
+networks in the background: this board has one radio, and switching it back to
+a client would drop an SSH session on the hotspot. A reboot tries the saved
+networks again before starting the hotspot.
+
+To try saved Wi-Fi while the hotspot is up, run this from USB SSH or a local
+shell. Do not run it from an SSH session on the hotspot; that session ends when
+the radio leaves access-point mode.
+
+```sh
+sudo terra-wifi-retry
+```
+
+`sudo systemctl start terra-wifi-retry.service` does the same thing. The
+command turns the hotspot off, starts the Wi-Fi client, and arms the same
+timeouts. If nothing connects, the hotspot comes back and stays up.
+
+The hotspot is a local connection and does not advertise an internet gateway or
+DNS server. While it is up, Pi uploads need Ethernet or the Mac USB log relay;
+otherwise logs remain queued. Saved Wi-Fi credentials are left in place.
+
+The single operator configuration is `/etc/terra-image/network.conf` (root-only).
+Both timeouts are set only in that file. To provision it while flashing, put a
+`terra-network.conf` on the FAT boot partition, with unquoted literal values:
+
+```text
+WIFI_MODE=fallback
+HOTSPOT_COUNTRY=US
+HOTSPOT_SSID=
+HOTSPOT_PASSPHRASE=choose-a-private-password
+WIFI_CONNECT_TIMEOUT=30
+WIFI_RETRY_TIMEOUT=15
+```
+
+`WIFI_MODE=fallback` is the default. `WIFI_MODE=client` never starts the
+hotspot. `WIFI_MODE=hotspot` starts it at boot and does not try saved networks.
+Set the regulatory country for your location. An empty SSID uses the Pi
+identity. An empty timeout uses the default. Each timeout is a whole number of
+seconds from 1 to 3600. The boot file is validated, copied into the protected
+root configuration, and removed from FAT. A missing passphrase generates a
+unique 24-character password on the device; retrieve it through USB SSH from
+the root-only configuration. There is no shared default password. Do not
+publish an image containing your provisioning file or an initialized network
+configuration. A card that already booted with `WIFI_MODE=hotspot` keeps that
+mode until you edit this file. No rover arming or motion setting changes.
+
+Run `examples/terra/scripts/test-network-setup.sh` for fixture tests of protected
+AP generation, USB addressing, repeat boots, fallback timing, the retry command,
+and safe secret parsing.
+
 ## First boot
 
 `terra-firstboot.service` copies headless-access files off the FAT boot partition, sets the hostname to `terra-` plus the last six hex digits of the Pi serial (or a random suffix when no serial exists), and grows the root filesystem to the card. systemd generates `machine-id` because the file ships empty. SSH host keys are absent from the image; `ssh-hostkeys-generate.service` creates a new set before sshd listens. `terra-rover` generates `terra-XXXXXX` itself the first time it can write `/var/lib/terra-rover/device-name.json`. That file is not in the image.
