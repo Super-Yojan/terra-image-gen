@@ -13,10 +13,13 @@ dtoverlay=dwc2,dr_mode=peripheral
 [all]
 EOF
 fi
-chmod 755 "$root/usr/local/sbin/terra-network-setup"
+chmod 755 "$root/usr/local/sbin/terra-network-setup" \
+ "$root/usr/local/sbin/terra-wifi-fallback" \
+ "$root/usr/local/sbin/terra-wifi-retry"
 chmod 600 "$root/etc/terra-image/network.conf"
 mkdir -p "$root/etc/systemd/system/multi-user.target.wants"
 ln -sfn ../terra-network-setup.service "$root/etc/systemd/system/multi-user.target.wants/terra-network-setup.service"
+ln -sfn ../terra-wifi-fallback.service "$root/etc/systemd/system/multi-user.target.wants/terra-wifi-fallback.service"
 # Debian masks hostapd until explicitly configured. This image configures it on boot.
 rm -f "$root/etc/systemd/system/hostapd.service"
 ln -sfn ../../../../lib/systemd/system/hostapd.service "$root/etc/systemd/system/multi-user.target.wants/hostapd.service"

@@ -1,60 +1,76 @@
 #!/bin/bash
-# Configure independent USB SSH and a protected, local-only Wi-Fi hotspot.
+# USB SSH plus saved Wi-Fi that falls back to a local hotspot.
+# Operators change timeouts only in /etc/terra-image/network.conf.
 set -euo pipefail
 export LC_ALL=C
 umask 077
 root=${TERRA_ROOT:-}
 boot=${TERRA_BOOT:-${root}/boot/firmware}
-configure_only=0
-case ${1:-} in --configure-only) configure_only=1 ;; '') ;; *) echo 'unsupported argument' >&2; exit 2 ;; esac
-fail() { echo "terra-network: $*" >&2; exit 1; }
-[[ -z $root || $configure_only == 1 ]] || fail 'alternate root requires --configure-only'
 config=$root/etc/terra-image/network.conf
-# USB recovery is independent of all Wi-Fi settings, including invalid inputs.
-install -d -m755 "$root/etc/systemd/network"
-serial=
-if [[ -r $root/proc/device-tree/serial-number ]]; then
- serial=$(tr -d '\0' < "$root/proc/device-tree/serial-number" | tr -cd '0-9a-fA-F' | tr 'A-F' 'a-f')
+hotspot_network=$root/etc/systemd/network/00-terra-hotspot.network
+hostapd_conf=$root/etc/hostapd/hostapd.conf
+hotspot_marker=$root/var/lib/terra-image/hotspot-mode
+fallback_marker=$root/var/lib/terra-image/wifi-fallback
+wpa_conf=$root/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+configure_only=0
+action=configure
+fail() { echo "terra-network: $*" >&2; exit 1; }
+case ${1:-} in
+ --configure-only) configure_only=1 ;;
+ --watch) action=watch ;;
+ --activate-hotspot) action=activate ;;
+ --retry-wifi) action=retry ;;
+ '') ;;
+ *) fail 'unsupported argument' ;;
+esac
+[[ -z $root || $configure_only == 1 || $action != configure ]] || fail 'alternate root requires --configure-only'
+if [[ -z $root ]]; then
+ uid=$(id -u)
+ [[ $uid -eq 0 ]] || fail 'run as root'
 fi
-if [[ -z $serial && -r $root/etc/machine-id ]]; then serial=$(tr -cd '0-9a-f' < "$root/etc/machine-id"); fi
-if [[ -z $serial ]]; then
- install -d -m700 "$root/var/lib/terra-image"
- seed=$root/var/lib/terra-image/network-id
- [[ -s $seed ]] || openssl rand -hex 8 > "$seed"
- serial=$(cat "$seed")
-fi
-cat > "$root/etc/systemd/network/00-terra-usb.network" <<'EOF'
-[Match]
-Name=usb0
-[Network]
-Address=192.168.77.1/30
-DHCPServer=yes
-LinkLocalAddressing=ipv6
-IPv6AcceptRA=no
-[DHCPServer]
-PoolOffset=2
-PoolSize=1
-EmitDNS=no
-EmitRouter=no
-EOF
-chmod 644 "$root/etc/systemd/network/00-terra-usb.network"
-if [[ $configure_only == 0 ]]; then
- model=$(tr -d '\0' < /proc/device-tree/model)
- case $model in
-  *'Raspberry Pi 4'*|*'Compute Module 4'*)
-   digest=$(printf '%s' "$serial" | sha256sum);digest=${digest%% *}
-   suffix=${digest:0:2}:${digest:2:2}:${digest:4:2}:${digest:6:2}
-   # Load after identity generation so the Mac sees stable Ethernet addresses.
-   modprobe g_ether "host_addr=02:54:$suffix" "dev_addr=02:55:$suffix" || echo "terra-network: USB gadget unavailable; hotspot setup continues" >&2
-   ;;
- esac
-fi
-# A rejected Wi-Fi configuration must never leave an old hotspot enabled.
-rm -f "$root/etc/systemd/network/00-terra-hotspot.network" "$root/var/lib/terra-image/hotspot-mode" "$root/etc/hostapd/hostapd.conf"
-mode=hotspot
+
+# Defaults apply only when network.conf omits a key. The image file is the
+# one place those values are configured.
+mode=fallback
 country=US
 ssid=
 passphrase=
+connect_timeout=30
+retry_timeout=15
+
+run_cmd() {
+ if [[ -n ${TERRA_COMMAND_LOG:-} ]]; then printf '%s\n' "$*" >> "$TERRA_COMMAND_LOG"; fi
+ if [[ -n $root ]]; then return 0; fi
+ "$@"
+}
+# Record a command status without abandoning set -e for the rest of the script.
+capture() {
+ set +e
+ "$@"
+ capture_status=$?
+ set -e
+}
+acquire_radio_lock() {
+ install -d -m700 "$root/var/lib/terra-image"
+ exec 9>>"$root/var/lib/terra-image/radio.lock"
+ flock 9
+}
+release_radio_lock() { flock -u 9 || true; }
+pause() {
+ if [[ -n ${TERRA_SLEEP_CMD:-} ]]; then "$TERRA_SLEEP_CMD" 1; else sleep 1; fi
+}
+wifi_is_up() {
+ local state
+ if [[ -n ${TERRA_WIFI_STATE_CMD:-} ]]; then
+  state=$("$TERRA_WIFI_STATE_CMD") || return 1
+  [[ $state == up ]]
+  return
+ fi
+ command -v wpa_cli >/dev/null 2>&1 || return 1
+ command -v ip >/dev/null 2>&1 || return 1
+ timeout 2 wpa_cli -i wlan0 status 2>/dev/null | grep -q '^wpa_state=COMPLETED$' || return 1
+ timeout 2 ip -4 -o addr show dev wlan0 scope global 2>/dev/null | grep -q 'inet '
+}
 read_config() {
  local line key value
  while IFS= read -r line || [[ -n $line ]]; do
@@ -67,29 +83,59 @@ read_config() {
    HOTSPOT_COUNTRY) country=$value ;;
    HOTSPOT_SSID) ssid=$value ;;
    HOTSPOT_PASSPHRASE) passphrase=$value ;;
+   WIFI_CONNECT_TIMEOUT) if [[ -n $value ]]; then connect_timeout=$value; fi ;;
+   WIFI_RETRY_TIMEOUT) if [[ -n $value ]]; then retry_timeout=$value; fi ;;
    *) fail 'unknown network configuration key' ;;
   esac
  done < "$1"
 }
-[[ ! -f $config ]] || read_config "$config"
-provision=$boot/terra-network.conf
-[[ ! -f $provision ]] || read_config "$provision"
-[[ $mode == hotspot || $mode == client ]] || fail 'WIFI_MODE must be hotspot or client'
-[[ $country =~ ^[A-Z]{2}$ ]] || fail 'HOTSPOT_COUNTRY must be a two-letter country code'
-[[ -n $ssid ]] || ssid=Terra-${serial: -6}
-[[ ${#ssid} -ge 1 && ${#ssid} -le 32 ]] || fail 'hotspot SSID must contain 1 to 32 bytes'
-[[ -n $passphrase ]] || passphrase=$(openssl rand -hex 12)
-[[ ${#passphrase} -ge 8 && ${#passphrase} -le 63 && $passphrase =~ ^[[:print:]]+$ ]] || fail 'hotspot passphrase must contain 8 to 63 bytes on one line'
-# Never source or evaluate operator-supplied configuration.
-install -d -m755 "$root/etc/terra-image" "$root/etc/systemd/network" "$root/etc/hostapd"
-install -d -m700 "$root/var/lib/terra-image"
-{
- printf 'WIFI_MODE=%s\nHOTSPOT_COUNTRY=%s\nHOTSPOT_SSID=%s\nHOTSPOT_PASSPHRASE=%s\n' "$mode" "$country" "$ssid" "$passphrase"
-} > "$config.tmp"
-chmod 600 "$config.tmp"
-mv "$config.tmp" "$config"
-if [[ $mode == hotspot ]]; then
- cat > "$root/etc/systemd/network/00-terra-hotspot.network" <<'EOF'
+normalize_timeouts() {
+ local name value n
+ for name in WIFI_CONNECT_TIMEOUT WIFI_RETRY_TIMEOUT; do
+  if [[ $name == WIFI_CONNECT_TIMEOUT ]]; then value=$connect_timeout; else value=$retry_timeout; fi
+  [[ $value =~ ^[0-9]+$ ]] || fail "$name must be a whole number of seconds"
+  n=$((10#$value))
+  (( n >= 1 && n <= 3600 )) || fail "$name must be from 1 to 3600 seconds"
+  if [[ $name == WIFI_CONNECT_TIMEOUT ]]; then connect_timeout=$n; else retry_timeout=$n; fi
+ done
+}
+load_config() {
+ mode=fallback
+ country=US
+ ssid=
+ passphrase=
+ connect_timeout=30
+ retry_timeout=15
+ [[ ! -f $config ]] || read_config "$config"
+ normalize_timeouts
+}
+write_config() {
+ local tmp=$config.tmp
+ install -d -m755 "$root/etc/terra-image"
+ {
+  printf '%s\n' '# Unquoted literals. Change Wi-Fi timeouts only in this file.'
+  printf 'WIFI_MODE=%s\n' "$mode"
+  printf 'HOTSPOT_COUNTRY=%s\n' "$country"
+  printf 'HOTSPOT_SSID=%s\n' "$ssid"
+  printf 'HOTSPOT_PASSPHRASE=%s\n' "$passphrase"
+  printf 'WIFI_CONNECT_TIMEOUT=%s\n' "$connect_timeout"
+  printf 'WIFI_RETRY_TIMEOUT=%s\n' "$retry_timeout"
+ } > "$tmp"
+ chmod 600 "$tmp"
+ mv "$tmp" "$config"
+}
+write_hostapd() {
+ install -d -m755 "$root/etc/hostapd"
+ {
+  printf 'interface=wlan0\ndriver=nl80211\ncountry_code=%s\nssid=%s\n' "$country" "$ssid"
+  printf '%s\n' 'hw_mode=g' 'channel=6' 'ieee80211n=1' 'wmm_enabled=1' 'auth_algs=1' 'wpa=2' 'wpa_key_mgmt=WPA-PSK' 'rsn_pairwise=CCMP'
+  printf 'wpa_passphrase=%s\n' "$passphrase"
+ } > "$hostapd_conf"
+ chmod 600 "$hostapd_conf"
+}
+write_hotspot_network() {
+ install -d -m755 "$root/etc/systemd/network"
+ cat > "$hotspot_network" <<'EOF'
 [Match]
 Name=wlan0
 [Network]
@@ -103,18 +149,200 @@ PoolSize=100
 EmitDNS=no
 EmitRouter=no
 EOF
- {
-  printf 'interface=wlan0\ndriver=nl80211\ncountry_code=%s\nssid=%s\n' "$country" "$ssid"
-  printf '%s\n' 'hw_mode=g' 'channel=6' 'ieee80211n=1' 'wmm_enabled=1' 'auth_algs=1' 'wpa=2' 'wpa_key_mgmt=WPA-PSK' 'rsn_pairwise=CCMP'
-  printf 'wpa_passphrase=%s\n' "$passphrase"
- } > "$root/etc/hostapd/hostapd.conf"
- chmod 600 "$root/etc/hostapd/hostapd.conf"
- : > "$root/var/lib/terra-image/hotspot-mode"
-else
- rm -f "$root/etc/systemd/network/00-terra-hotspot.network" "$root/var/lib/terra-image/hotspot-mode" "$root/etc/hostapd/hostapd.conf"
-fi
-chmod 644 "$root/etc/systemd/network/00-terra-usb.network"
-[[ ! -f $root/etc/systemd/network/00-terra-hotspot.network ]] || chmod 644 "$root/etc/systemd/network/00-terra-hotspot.network"
-# Provisioning is consumed only after validated configuration is durable.
-[[ ! -f $provision ]] || rm -f "$provision"
-printf 'terra-network: mode=%s ssid=%s USB=192.168.77.1 hotspot=192.168.78.1\n' "$mode" "$ssid"
+ chmod 644 "$hotspot_network"
+}
+clear_radio_files() {
+ rm -f "$hotspot_network" "$hostapd_conf" "$hotspot_marker" "$fallback_marker"
+}
+write_usb_network() {
+ install -d -m755 "$root/etc/systemd/network"
+ cat > "$root/etc/systemd/network/00-terra-usb.network" <<'EOF'
+[Match]
+Name=usb0
+[Network]
+Address=192.168.77.1/30
+DHCPServer=yes
+LinkLocalAddressing=ipv6
+IPv6AcceptRA=no
+[DHCPServer]
+PoolOffset=2
+PoolSize=1
+EmitDNS=no
+EmitRouter=no
+EOF
+ chmod 644 "$root/etc/systemd/network/00-terra-usb.network"
+}
+bring_up_hotspot() {
+ # Marker first, so a restarted supplicant cannot take the radio back.
+ : > "$hotspot_marker"
+ capture run_cmd systemctl stop wpa_supplicant@wlan0.service
+ capture run_cmd ip link set dev wlan0 down
+ write_hotspot_network
+ capture run_cmd rfkill unblock wifi
+ capture run_cmd networkctl reload
+ if [[ $capture_status -ne 0 ]]; then echo 'terra-network: networkctl reload failed' >&2; fi
+ local started=0 attempt
+ for attempt in 1 2 3 4 5; do
+  capture run_cmd systemctl start hostapd.service
+  if [[ $capture_status -eq 0 ]]; then started=1; break; fi
+  echo "terra-network: hostapd did not start (attempt $attempt)" >&2
+  pause
+ done
+ [[ $started -eq 1 ]] || fail 'hostapd did not start'
+ capture run_cmd networkctl reconfigure wlan0
+ if [[ $capture_status -ne 0 ]]; then echo 'terra-network: networkctl reconfigure wlan0 failed' >&2; fi
+ echo 'terra-network: hotspot active; it stays up until terra-wifi-retry'
+}
+activate_hotspot() {
+ load_config
+ [[ $mode != client ]] || fail 'hotspot activation is disabled when WIFI_MODE=client'
+ [[ -f $hostapd_conf ]] || fail 'hotspot configuration is missing'
+ acquire_radio_lock
+ bring_up_hotspot
+ release_radio_lock
+}
+retry_wifi() {
+ load_config
+ [[ $mode == fallback ]] || fail "terra-wifi-retry applies to WIFI_MODE=fallback (this device is $mode)"
+ if [[ ! -f $hotspot_marker ]]; then
+  echo 'terra-network: saved Wi-Fi is already in use'
+  exit 0
+ fi
+ echo 'terra-network: stopping the hotspot to retry saved Wi-Fi; SSH on 192.168.78.1 will drop'
+ acquire_radio_lock
+ capture run_cmd systemctl stop hostapd.service
+ if [[ $capture_status -ne 0 ]]; then
+  release_radio_lock
+  fail 'could not stop hostapd'
+ fi
+ capture run_cmd ip link set dev wlan0 down
+ rm -f "$hotspot_network" "$hotspot_marker"
+ capture run_cmd networkctl reload
+ if [[ $capture_status -ne 0 ]]; then echo 'terra-network: networkctl reload failed' >&2; fi
+ capture run_cmd networkctl reconfigure wlan0
+ if [[ $capture_status -ne 0 ]]; then echo 'terra-network: networkctl reconfigure wlan0 failed' >&2; fi
+ capture run_cmd rfkill unblock wifi
+ if [[ -f $wpa_conf ]]; then
+  capture run_cmd systemctl start --no-block wpa_supplicant@wlan0.service
+  if [[ $capture_status -ne 0 ]]; then echo 'terra-network: wpa_supplicant did not start' >&2; fi
+ else
+  echo 'terra-network: no saved Wi-Fi configuration; the hotspot returns if nothing connects'
+ fi
+ install -d -m700 "$root/var/lib/terra-image"
+ : > "$fallback_marker"
+ release_radio_lock
+ run_cmd systemctl restart terra-wifi-fallback.service
+ echo 'terra-network: retrying saved Wi-Fi'
+}
+start_client_radio() {
+ [[ -f $wpa_conf ]] || return 0
+ capture run_cmd systemctl start --no-block wpa_supplicant@wlan0.service
+}
+monitor_drop() {
+ local down=0 ticks=0
+ while true; do
+  if [[ -n ${TERRA_MAX_TICKS:-} ]] && (( ticks >= TERRA_MAX_TICKS )); then exit 0; fi
+  capture wifi_is_up
+  if [[ $capture_status -eq 0 ]]; then
+   if (( down > 0 )); then echo 'terra-network: saved Wi-Fi returned'; fi
+   down=0
+  else
+   down=$((down + 1))
+   if (( down == 1 )); then echo "terra-network: saved Wi-Fi is down; waiting ${retry_timeout}s before the hotspot"; fi
+   if (( down >= retry_timeout )); then
+    echo "terra-network: saved Wi-Fi dropped; starting hotspot after ${retry_timeout}s"
+    # One switch, then stop. Scanning again would retune the only radio and drop hotspot SSH.
+    activate_hotspot
+    exit 0
+   fi
+  fi
+  pause
+  ticks=$((ticks + 1))
+ done
+}
+watch_wifi() {
+ load_config
+ [[ $mode == fallback ]] || exit 0
+ [[ ! -f $hotspot_marker ]] || exit 0
+ start_client_radio
+ local ticks=0
+ while (( ticks < connect_timeout )); do
+  capture wifi_is_up
+  if [[ $capture_status -eq 0 ]]; then
+   echo 'terra-network: saved Wi-Fi connected; hotspot stays off until it drops'
+   monitor_drop
+  fi
+  pause
+  ticks=$((ticks + 1))
+ done
+ echo "terra-network: saved Wi-Fi did not connect in ${connect_timeout}s; starting hotspot"
+ activate_hotspot
+ exit 0
+}
+configure_network() {
+ write_usb_network
+ local serial=
+ if [[ -r $root/proc/device-tree/serial-number ]]; then
+  serial=$(tr -d '\0' < "$root/proc/device-tree/serial-number" | tr -cd '0-9a-fA-F' | tr 'A-F' 'a-f')
+ fi
+ if [[ -z $serial && -r $root/etc/machine-id ]]; then serial=$(tr -cd '0-9a-f' < "$root/etc/machine-id"); fi
+ if [[ -z $serial ]]; then
+  install -d -m700 "$root/var/lib/terra-image"
+  local seed=$root/var/lib/terra-image/network-id
+  [[ -s $seed ]] || openssl rand -hex 8 > "$seed"
+  serial=$(cat "$seed")
+ fi
+ if [[ $configure_only == 0 ]]; then
+  local model digest suffix
+  model=$(tr -d '\0' < /proc/device-tree/model)
+  case $model in
+   *'Raspberry Pi 4'*|*'Compute Module 4'*)
+    digest=$(printf '%s' "$serial" | sha256sum); digest=${digest%% *}
+    suffix=${digest:0:2}:${digest:2:2}:${digest:4:2}:${digest:6:2}
+    # Load after identity generation so the Mac sees stable Ethernet addresses.
+    modprobe g_ether "host_addr=02:54:$suffix" "dev_addr=02:55:$suffix" || echo 'terra-network: USB gadget unavailable; hotspot setup continues' >&2
+    ;;
+  esac
+ fi
+ # A rejected Wi-Fi configuration must never leave an old hotspot enabled.
+ clear_radio_files
+ mode=fallback
+ country=US
+ ssid=
+ passphrase=
+ connect_timeout=30
+ retry_timeout=15
+ [[ ! -f $config ]] || read_config "$config"
+ local provision=$boot/terra-network.conf
+ [[ ! -f $provision ]] || read_config "$provision"
+ [[ $mode == hotspot || $mode == client || $mode == fallback ]] || fail 'WIFI_MODE must be hotspot, client, or fallback'
+ [[ $country =~ ^[A-Z]{2}$ ]] || fail 'HOTSPOT_COUNTRY must be a two-letter country code'
+ normalize_timeouts
+ [[ -n $ssid ]] || ssid=Terra-${serial: -6}
+ [[ ${#ssid} -ge 1 && ${#ssid} -le 32 ]] || fail 'hotspot SSID must contain 1 to 32 bytes'
+ [[ -n $passphrase ]] || passphrase=$(openssl rand -hex 12)
+ [[ ${#passphrase} -ge 8 && ${#passphrase} -le 63 && $passphrase =~ ^[[:print:]]+$ ]] || fail 'hotspot passphrase must contain 8 to 63 bytes on one line'
+ # Never source or evaluate operator-supplied configuration.
+ install -d -m700 "$root/var/lib/terra-image"
+ write_config
+ if [[ $mode == hotspot ]]; then
+  write_hotspot_network
+  write_hostapd
+  : > "$hotspot_marker"
+ elif [[ $mode == fallback ]]; then
+  write_hostapd
+  : > "$fallback_marker"
+ fi
+ chmod 644 "$root/etc/systemd/network/00-terra-usb.network"
+ # Provisioning is consumed only after validated configuration is durable.
+ [[ ! -f $provision ]] || rm -f "$provision"
+ printf 'terra-network: mode=%s ssid=%s connect_timeout=%s retry_timeout=%s USB=192.168.77.1 hotspot=192.168.78.1\n' \
+  "$mode" "$ssid" "$connect_timeout" "$retry_timeout"
+}
+
+case $action in
+ configure) configure_network ;;
+ watch) watch_wifi ;;
+ activate) activate_hotspot ;;
+ retry) retry_wifi ;;
+esac
