@@ -1,9 +1,8 @@
 name: terra-image
 
 on:
-  pull_request:
   push:
-    branches: [master]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
