@@ -1,0 +1,3 @@
+#!/bin/bash
+# Leave the Terra hotspot and try saved Wi-Fi again. Hotspot SSH will drop.
+exec /usr/local/sbin/terra-network-setup --retry-wifi

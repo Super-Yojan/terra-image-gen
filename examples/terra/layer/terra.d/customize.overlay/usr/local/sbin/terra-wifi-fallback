@@ -1,0 +1,3 @@
+#!/bin/bash
+# Keep watching saved Wi-Fi until the Terra hotspot has to start.
+exec /usr/local/sbin/terra-network-setup --watch

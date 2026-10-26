@@ -1,0 +1,12 @@
+[Unit]
+Description=Terra USB SSH and Wi-Fi hotspot fallback configuration
+DefaultDependencies=no
+After=local-fs.target terra-firstboot.service
+Before=network-pre.target systemd-networkd.service hostapd.service ssh.service terra-wifi-fallback.service
+Wants=network-pre.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/terra-network-setup
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
