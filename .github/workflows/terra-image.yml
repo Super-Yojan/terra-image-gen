@@ -1,9 +1,27 @@
 name: terra-image
 
+# Build, check and publish the Terra SD card image.
+#
+# - A pushed terra-image-v<version> tag, or a manual run with `release` set to
+#   that tag name, publishes a GitHub release with the image, its bmap and
+#   checksum, and the Raspberry Pi Imager OS list. A missing tag is created at
+#   the commit the run started from. The OS list on the terra-imager-latest
+#   release is then replaced, so the stable Imager URL offers the new image.
+# - A manual run with no `release` only builds and checks the image.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "terra-image-v*"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Tag to publish, for example terra-image-v0.2.0. Leave empty to build and check only."
+        required: false
+        type: string
+      prerelease:
+        description: "Mark the release as a pre-release."
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -13,26 +31,38 @@ jobs:
     name: build and check Terra image
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
+    permissions:
+      contents: write
     steps:
+      - name: resolve release tag
+        id: tag
+        env:
+          INPUT_RELEASE: ${{ inputs.release }}
+        run: |
+          set -euo pipefail
+          tag=
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="${INPUT_RELEASE}"
+          else
+            case "${GITHUB_REF_NAME}" in
+              terra-image-v*) tag="${GITHUB_REF_NAME}" ;;
+            esac
+          fi
+          if [ -n "${tag}" ]; then
+            case "${tag}" in
+              terra-image-v[0-9]*) ;;
+              *) echo "refusing: '${tag}' must be terra-image-v<version>" >&2; exit 1 ;;
+            esac
+            case "${tag}" in
+              *[!A-Za-z0-9._+-]*|*..*) echo "refusing: '${tag}' has unsupported characters" >&2; exit 1 ;;
+            esac
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
       - name: checkout terra-image-gen
         uses: actions/checkout@v4
-
-      - name: checkout pinned Terra
-        uses: actions/checkout@v4
         with:
-          repository: Super-Yojan/Terra
-          ref: f08d0c15ebe2c585169d68448c42745d300cd9be
-          path: .terra-src
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: build terra-rover tarball
-        working-directory: .terra-src
-        run: |
-          set -eu
-          docker buildx build --platform linux/arm64 \
-            -f packaging/rover/Dockerfile \
-            --output type=local,dest=/tmp/terra-rover-dist .
+          ref: ${{ github.sha }}
 
       - name: host dependencies
         run: |
@@ -47,14 +77,10 @@ jobs:
           ./examples/terra/scripts/test-boot-provision.sh
           ./examples/terra/scripts/test-network-setup.sh
 
+      # build-image.sh downloads the terra-rover release pinned in pins.env and
+      # refuses a tarball whose sha256 differs from the pin.
       - name: build image
-        run: |
-          set -eu
-          tarball=$(echo /tmp/terra-rover-dist/terra-rover-*-linux-arm64.tar.gz)
-          test -f "$tarball"
-          sha=$(sha256sum "$tarball" | awk '{print $1; exit}')
-          TERRA_ROVER_TARBALL="$tarball" TERRA_ROVER_SHA256="$sha" \
-            ./examples/terra/scripts/build-image.sh
+        run: ./examples/terra/scripts/build-image.sh
 
       - name: check image
         run: |
@@ -72,12 +98,110 @@ jobs:
           echo "qemu log follows"
           cat "$RUNNER_TEMP/qemu-boot.log" || true
 
+      - name: collect release files
+        id: dist
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          xz=$(find work -type f -path '*/deploy-*/terra-bookworm-arm64.img.xz' | head -n 1)
+          test -n "$xz"
+          deploy=$(dirname "$xz")
+          dist="$RUNNER_TEMP/dist"
+          mkdir -p "$dist"
+          cp "$xz" "$deploy/terra-bookworm-arm64.img.bmap" "$deploy/terra-image-release" "$dist/"
+          (cd "$dist" && sha256sum terra-bookworm-arm64.img.xz > terra-bookworm-arm64.img.xz.sha256)
+          tag="${RELEASE_TAG:-unreleased}"
+          TERRA_IMAGE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/terra-bookworm-arm64.img.xz" \
+          TERRA_RELEASE_DATE="$(date -u +%F)" \
+          TERRA_OS_LIST_OUT="$dist/terra-os-list.json" \
+            ./examples/terra/imager/write-os-list.sh "$dist/terra-bookworm-arm64.img.xz"
+          echo "dir=$dist" >> "$GITHUB_OUTPUT"
+
       - name: upload image
         uses: actions/upload-artifact@v4
         with:
           name: terra-bookworm-arm64
           if-no-files-found: error
-          path: |
-            work/deploy-*/terra-bookworm-arm64.img.xz
-            work/deploy-*/terra-bookworm-arm64.img.bmap
-            work/deploy-*/terra-image-release
+          path: ${{ steps.dist.outputs.dir }}/*
+
+      - name: publish release
+        if: steps.tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          DIST: ${{ steps.dist.outputs.dir }}
+          PRERELEASE: ${{ github.event_name == 'push' || inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "refusing: release ${RELEASE_TAG} already exists" >&2
+            exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            tagged="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}" --jq .sha)"
+            if [ "${tagged}" != "${GITHUB_SHA}" ]; then
+              echo "refusing: tag ${RELEASE_TAG} is ${tagged}, but this run built ${GITHUB_SHA}" >&2
+              exit 1
+            fi
+            target=(--verify-tag)
+          else
+            target=(--target "${GITHUB_SHA}")
+          fi
+          flags=()
+          if [ "${PRERELEASE}" = "true" ]; then flags+=(--prerelease); fi
+
+          # shellcheck disable=SC1091
+          . "$DIST/terra-image-release"
+          xz_sha=$(awk '{ print $1 }' "$DIST/terra-bookworm-arm64.img.xz.sha256")
+          xz_size=$(stat -c '%s' "$DIST/terra-bookworm-arm64.img.xz")
+          read -r ex_size ex_sha < <(python3 -c 'import json,sys; o=json.load(open(sys.argv[1]))["os_list"][0]; print(o["extract_size"], o["extract_sha256"])' "$DIST/terra-os-list.json")
+          stable="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/terra-os-list.json"
+          {
+            echo "Terra Bookworm arm64 image for **Raspberry Pi 4 and Pi 5**."
+            echo
+            echo "- terra-rover ${TERRA_ROVER_VERSION} (Terra \`${TERRA_GIT_REF}\`)"
+            echo "- Fusion HAT driver ${TERRA_FUSION_DRIVER_VERSION}, library ${TERRA_FUSION_VERSION}"
+            echo "- Built from terra-image-gen \`${IMAGE_GIT}\`"
+            echo
+            echo "## Flash"
+            echo
+            echo "Step-by-step guide with screenshots: https://super-yojan.dev/Terra/hardware/FLASH_SD/"
+            echo
+            echo '```sh'
+            echo "open -a 'Raspberry Pi Imager' --args --repo ${stable}"
+            echo '```'
+            echo
+            echo "## Download"
+            echo
+            echo "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/terra-bookworm-arm64.img.xz"
+            echo
+            echo "- sha256: \`${xz_sha}\`"
+            echo "- size: ${xz_size} bytes"
+            echo "- uncompressed sha256: \`${ex_sha}\`"
+            echo "- uncompressed size: ${ex_size} bytes"
+            echo
+            echo "No password, Wi-Fi password or SSH key is baked in. Raspberry Pi Imager sets them while it writes the card."
+          } > "$RUNNER_TEMP/notes.md"
+
+          gh release create "${RELEASE_TAG}" "${target[@]}" "${flags[@]}" \
+            --title "terra-image ${RELEASE_TAG#terra-image-}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "$DIST/terra-bookworm-arm64.img.xz" \
+            "$DIST/terra-bookworm-arm64.img.xz.sha256" \
+            "$DIST/terra-bookworm-arm64.img.bmap" \
+            "$DIST/terra-image-release" \
+            "$DIST/terra-os-list.json"
+
+          # The stable Imager URL serves the OS list from terra-imager-latest.
+          gh release upload terra-imager-latest "$DIST/terra-os-list.json" --clobber
+          {
+            echo "Stable Raspberry Pi Imager OS list for Terra."
+            echo
+            echo "${stable}"
+            echo
+            echo "This release is the OS list only. The image it points at is [${RELEASE_TAG}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG})."
+            echo
+            echo "Guide: https://super-yojan.dev/Terra/hardware/FLASH_SD/"
+          } > "$RUNNER_TEMP/latest.md"
+          gh release edit terra-imager-latest --notes-file "$RUNNER_TEMP/latest.md"

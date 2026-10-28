@@ -24,10 +24,10 @@ mkdir -p \
 
 printf '%s\n' terra > "$good/etc/hostname"
 : > "$good/etc/machine-id"
-printf '%s\n' 'TERRA_PWM_PORTS=P0,P1,P2,P3,P4,P5' > "$good/etc/terra-rover/rover.env"
+printf '%s\n' '# Read by systemd; these are strings, not shell commands.' > "$good/etc/terra-rover/rover.env"
 cat > "$good/etc/systemd/system/terra-rover.service" << 'EOF'
 [Service]
-ExecStart=/usr/local/bin/terra-rover --button-pairing --pwm-ports ${TERRA_PWM_PORTS}
+ExecStart=/usr/local/bin/terra-rover --button-pairing --config /var/lib/terra-rover/layout.json --owner /var/lib/terra-rover/owner.json
 EOF
 printf '%s\n' '[Service]' 'ExecStart=/usr/local/sbin/terra-firstboot' > "$good/etc/systemd/system/terra-firstboot.service"
 ln -s ../terra-rover.service "$good/etc/systemd/system/multi-user.target.wants/terra-rover.service"
@@ -79,7 +79,6 @@ TERRA_FUSION_COMMIT=4bd1018ad5a70ee113160536f969cdadd9f22918
 TERRA_FUSION_SHA256=37ea53b9b72b6431a4a2ee8b752804ad74f0f10071c416f856991814347d9c2d
 TERRA_ROVER_SHA256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 TERRA_DEVICES=pi4,pi5
-TERRA_PWM_PORTS=P0,P1,P2,P3,P4,P5
 EOF
 
 "$check" --root "$good" --skip-exec

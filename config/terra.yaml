@@ -32,16 +32,15 @@ deploy:
   compression: none
 
 terra:
-  source_ref: f08d0c15ebe2c585169d68448c42745d300cd9be
-  rover_version: 0.2.0
-  rover_url: https://github.com/Super-Yojan/Terra/releases/download/rover-v0.2.0/terra-rover-0.2.0-linux-arm64.tar.gz
-  rover_sha256: 4c537d1123e8e74992c46d68a218d6da5575a1461f9c29e7cbd5d887c9cd6553
+  source_ref: a72fcc4e6868e4c4d3fdb8877508cec24ac40e5b
+  rover_version: 0.3.0
+  rover_url: https://github.com/Super-Yojan/Terra/releases/download/rover-v0.3.0/terra-rover-0.3.0-linux-arm64.tar.gz
+  rover_sha256: c393eeb75077c8b402d8977adfa7a0f1bdfdcbe2c8795e919a2dcc9fa08df585
   rover_tarball: ""
   fusion_commit: 4bd1018ad5a70ee113160536f969cdadd9f22918
   fusion_sha256: 37ea53b9b72b6431a4a2ee8b752804ad74f0f10071c416f856991814347d9c2d
   fusion_version: 1.14.0
   fusion_driver_version: 1.1.0
-  pwm_ports: P0,P1,P2,P3,P4,P5
   lab_ssh: y
   lab_wifi_ssid: ""
   lab_wifi_psk: ""

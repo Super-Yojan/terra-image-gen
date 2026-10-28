@@ -15,16 +15,16 @@ sudo apt-get install -y qemu-user-static binfmt-support bmap-tools xz-utils mtoo
 sudo ./install_deps.sh
 ```
 
-`examples/terra/pins.env` pins terra-rover 0.2.0 to the GitHub Release [rover-v0.2.0](https://github.com/Super-Yojan/Terra/releases/tag/rover-v0.2.0). From this repository:
+`examples/terra/pins.env` pins terra-rover 0.3.0 to the GitHub Release [rover-v0.3.0](https://github.com/Super-Yojan/Terra/releases/tag/rover-v0.3.0). From this repository:
 
 ```sh
 ./examples/terra/scripts/build-image.sh
 ```
 
-That downloads `terra-rover-0.2.0-linux-arm64.tar.gz` and refuses to continue unless its sha256 is `4c537d1123e8e74992c46d68a218d6da5575a1461f9c29e7cbd5d887c9cd6553`. A local file skips the download. It is checked against the same pin unless you also set `TERRA_ROVER_SHA256`:
+That downloads `terra-rover-0.3.0-linux-arm64.tar.gz` and refuses to continue unless its sha256 is `c393eeb75077c8b402d8977adfa7a0f1bdfdcbe2c8795e919a2dcc9fa08df585`. A local file skips the download. It is checked against the same pin unless you also set `TERRA_ROVER_SHA256`:
 
 ```sh
-TERRA_ROVER_TARBALL=/path/to/terra-rover-0.2.0-linux-arm64.tar.gz \
+TERRA_ROVER_TARBALL=/path/to/terra-rover-0.3.0-linux-arm64.tar.gz \
   ./examples/terra/scripts/build-image.sh
 ```
 
@@ -51,7 +51,7 @@ Outputs (names follow the artefact version directory):
   The installer itself only appends `dtoverlay=sunfounder-fusionhat`. `fusion_hat` enables I2C with `raspi-config nonint do_i2c 0`, which is `dtparam=i2c_arm=on` plus the `i2c-dev` module. The HAT's SPI header and I2S speaker/mic are the other two `dtparam` lines (they ship commented out in the Raspberry Pi template). `dtparam=audio=off` turns off the Pi's PWM analog audio so it does not claim the sound node the overlay replaces. HAT PWM connectors are the MCU at I2C `0x17`, not a Pi `pwm` overlay.
 - The vendor audio/voice userspace stack is not installed. The kernel module still includes the vendor speaker driver, because that is part of the pinned driver and the HAT probe path.
 - `terra-rover` from `install.sh --root`, user `terra-rover` in groups `i2c` and `bluetooth`, `/var/lib/terra-rover` mode 0700 owned by that user, `terra-rover.service` enabled.
-- Safety defaults from Terra: button pairing, no `--gate-file`, battery cutoff left external. Pairing does not arm. `TERRA_PWM_PORTS` defaults to `P0,P1,P2,P3,P4,P5` (`terra.pwm_ports`). P4 and P5 are also motor M3's pins, so one layout cannot use M3 together with P4 or P5.
+- Safety defaults from Terra: button pairing, no `--gate-file`, battery cutoff left external. Since terra-rover 0.3.0 the Pi is a plain relay with no arm step: it holds each drive command from the phone for 250 ms, then returns every output to its safe value. Every Fusion HAT channel (M0-M3, P0-P11) is available and the saved layout decides which ones open, so the image no longer sets `TERRA_PWM_PORTS`.
 
 ## Direct connections: USB and the Terra hotspot
 
@@ -200,8 +200,8 @@ A lab build can still bake a key or a Wi-Fi PSK. Those values are on every card 
   IGconf_ssh_pubkey_user1="$(cat ~/.ssh/id_ed25519.pub)" \
   IGconf_terra_lab_wifi_ssid=lab \
   IGconf_terra_lab_wifi_psk=lab-password \
-  IGconf_terra_rover_tarball=/absolute/path/terra-rover-0.2.0-linux-arm64.tar.gz \
-  IGconf_terra_rover_sha256="$(awk '{print $1; exit}' /absolute/path/terra-rover-0.2.0-linux-arm64.tar.gz.sha256)"
+  IGconf_terra_rover_tarball=/absolute/path/terra-rover-0.3.0-linux-arm64.tar.gz \
+  IGconf_terra_rover_sha256="$(awk '{print $1; exit}' /absolute/path/terra-rover-0.3.0-linux-arm64.tar.gz.sha256)"
 ```
 
 `examples/terra/scripts/check-image.sh` rejects credentials unless you pass `--allow-lab`.

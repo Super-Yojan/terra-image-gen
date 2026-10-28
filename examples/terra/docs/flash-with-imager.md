@@ -1,5 +1,7 @@
 # Flash Terra with Raspberry Pi Imager
 
+The illustrated guide is on the Terra website: https://super-yojan.dev/Terra/hardware/FLASH_SD/
+
 Terra is a 64-bit Raspberry Pi OS Bookworm image for **Raspberry Pi 4 and Pi 5** with the Fusion HAT driver and the terra-rover service already installed. Raspberry Pi Imager can set the username, password, SSH key, Wi-Fi, hostname, and locale while it writes the card. You do not need a modified Imager.
 
 Use Imager **1.8.x, 1.9.x, or 2.x**. Terra's OS list says `init_format` is `systemd`, which is the customisation format those versions all apply.
@@ -14,9 +16,7 @@ The list is a single JSON file. The stable address, which always points at the c
 
 https://github.com/Super-Yojan/terra-image-gen/releases/latest/download/terra-os-list.json
 
-This pre-release's copy of the same file is:
-
-https://github.com/Super-Yojan/terra-image-gen/releases/download/terra-image-v0.1.0-rc3/terra-os-list.json
+Each image release also carries its own copy, at `https://github.com/Super-Yojan/terra-image-gen/releases/download/<tag>/terra-os-list.json`.
 
 **macOS**
 
@@ -76,19 +76,10 @@ Use the username and hostname from step 4. If you left the hostname blank, try `
 
 You can still write `terra-bookworm-arm64.img.xz` with Imager's "Use custom" file picker. Imager 1.8 treats a local file as `systemd` customisation and will apply the settings above. Imager 2.x treats a local file as having no customisation unless you open Imager with the `--repo` command in step 2 and pick Terra from that list. Use the launcher when you want the settings dialog.
 
-## This pre-release
+## Hashes
 
-The OS list above downloads:
-
-https://github.com/Super-Yojan/terra-image-gen/releases/download/terra-image-v0.1.0-rc3/terra-bookworm-arm64.img.xz
-
-- sha256: `56c89d430b2f05152657b9ef916718879d4a18ad472c31edfe2ae66e80b7e464`
-- size: 289423836 bytes
-- uncompressed image sha256: `063c33ce99d00c703953859b2b22534a77c6d4fe3d2885f08820a34bc95c07bb`
-- uncompressed size: 2063597568 bytes
-
-Imager checks the download against `image_download_sha256` in the OS list before it writes.
+Each release page lists the sha256 and size of `terra-bookworm-arm64.img.xz` and of the uncompressed image. Imager checks the download against `image_download_sha256` in the OS list before it writes.
 
 ## What the image does not contain
 
-No Wi-Fi password, no SSH key, and no login password are baked into the file you download. Each card gets its own machine-id and SSH host keys on first boot. This image has not been verified on a Fusion HAT. Treat the first boot on hardware as a test.
+No Wi-Fi password, no SSH key, and no login password are baked into the file you download. Each card gets its own machine-id and SSH host keys on first boot. Treat the first boot of each new release on hardware as a test.

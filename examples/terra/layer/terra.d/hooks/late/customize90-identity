@@ -102,8 +102,9 @@ else
          "$root/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service"
 fi
 
-# The service command must keep Terra's safety defaults. PWM connectors are
-# the configured list; pairing still does not arm and there is no gate file.
+# The service command must keep Terra's safety defaults: button pairing and
+# no gate file. terra-rover 0.3.0 opens only the channels in the saved layout,
+# so rover.env carries no port list.
 unit=$root/etc/systemd/system/terra-rover.service
 [[ -f $unit ]] || { echo "terra: missing $unit" >&2; exit 1; }
 grep -q -- '--button-pairing' "$unit"
@@ -111,15 +112,5 @@ if grep -q -- '--gate-file' "$unit"; then
    echo "terra: terra-rover.service must not set --gate-file" >&2
    exit 1
 fi
-ports=${IGconf_terra_pwm_ports:-P0,P1,P2,P3,P4,P5}
-[[ $ports =~ ^(P([0-9]|1[01]))(,P([0-9]|1[01]))*$ ]] || {
-   echo "terra: pwm_ports must be a comma-separated list of P0 through P11" >&2
-   exit 1
-}
 envfile=$root/etc/terra-rover/rover.env
 [[ -f $envfile ]] || { echo "terra: missing $envfile" >&2; exit 1; }
-grep -v '^TERRA_PWM_PORTS=' "$envfile" > "$envfile.terra"
-printf 'TERRA_PWM_PORTS=%s\n' "$ports" >> "$envfile.terra"
-mv "$envfile.terra" "$envfile"
-chmod 0644 "$envfile"
-grep -q "^TERRA_PWM_PORTS=${ports}$" "$envfile"

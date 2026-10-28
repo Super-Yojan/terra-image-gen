@@ -2,7 +2,7 @@
 # One command: build the pinned Terra Bookworm arm64 image.
 # Usage:
 #   ./examples/terra/scripts/build-image.sh
-#   TERRA_ROVER_TARBALL=/path/to/terra-rover-0.2.0-linux-arm64.tar.gz \
+#   TERRA_ROVER_TARBALL=/path/to/terra-rover-0.3.0-linux-arm64.tar.gz \
 #     ./examples/terra/scripts/build-image.sh
 set -euo pipefail
 
