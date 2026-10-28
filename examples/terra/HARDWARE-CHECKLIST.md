@@ -30,12 +30,13 @@ Run this on a Pi 4 and a Pi 5, each with a Fusion HAT, an external battery cutof
 ## terra-rover
 
 - [ ] `terra-rover --check-bundle` prints the pinned bless, bleak, dbus-next, and fusion_hat versions.
-- [ ] `/etc/terra-rover/rover.env` contains `TERRA_PWM_PORTS=P0,P1,P2,P3,P4,P5`.
+- [ ] `terra-rover --help` has no `--gate-file` or `--pwm-ports` option (terra-rover 0.3.0 relay).
 - [ ] The service is running and waiting. It has not created `/var/lib/terra-rover/owner.json`.
-- [ ] Holding the USR button for three seconds blinks the LED slowly and opens the pairing window. Releasing without a phone does not arm anything.
+- [ ] Holding the USR button for three seconds blinks the LED slowly and opens the pairing window. Releasing without a phone moves no output.
 - [ ] `/var/lib/terra-rover/device-name.json` appears only after the service has run, and the name differs across cards.
 - [ ] TerraPhone can find that `terra-XXXXXX` name and complete enrollment. Three LED flashes, then the LED stays on after reconnect.
-- [ ] Motors stay off through enrollment. Arming still requires an explicit arm and a layout. There is no gate file.
+- [ ] Motors stay off through enrollment and until a layout is saved. There is no arm step and no gate file.
+- [ ] With wheels up, a drive command moves the outputs, and they return to the safe value within about 250 ms after TerraPhone stops sending.
 
 ## USB SSH and Wi-Fi fallback
 

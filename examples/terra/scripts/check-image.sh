@@ -198,11 +198,12 @@ if [[ $allow_lab -eq 0 ]]; then
    ok "no Wi-Fi credentials, password hashes, or SSH public keys"
 fi
 
-[[ $(readf "$root/etc/terra-rover/rover.env" | grep -c '^TERRA_PWM_PORTS=P0,P1,P2,P3,P4,P5$') -eq 1 ]] || fail "TERRA_PWM_PORTS is not P0,P1,P2,P3,P4,P5"
+exists "$root/etc/terra-rover/rover.env" || fail "missing /etc/terra-rover/rover.env"
 unit=$(readf "$root/etc/systemd/system/terra-rover.service")
 grep -q -- '--button-pairing' <<< "$unit" || fail "service is not the button-pairing command"
 grep -q -- '--gate-file' <<< "$unit" && fail "service sets --gate-file"
-ok "safety defaults (PWM ports P0-P5, button pairing, no gate file)"
+grep -q -- '--pwm-ports' <<< "$unit" && fail "service passes --pwm-ports, which terra-rover 0.3.0 does not accept"
+ok "safety defaults (button pairing, no gate file)"
 
 exists "$root/etc/systemd/system/multi-user.target.wants/terra-rover.service" || fail "terra-rover.service is not enabled"
 exists "$root/etc/systemd/system/sysinit.target.wants/terra-firstboot.service" || fail "terra-firstboot.service is not enabled"
@@ -349,7 +350,6 @@ grep -q '^TERRA_FUSION_COMMIT=4bd1018ad5a70ee113160536f969cdadd9f22918$' <<< "$m
 grep -q '^TERRA_FUSION_SHA256=37ea53b9b72b6431a4a2ee8b752804ad74f0f10071c416f856991814347d9c2d$' <<< "$manifest" || fail "manifest fusion hash"
 grep -q '^TERRA_ROVER_SHA256=[0-9a-f]\{64\}$' <<< "$manifest" || fail "manifest rover hash"
 grep -q '^TERRA_DEVICES=pi4,pi5$' <<< "$manifest" || fail "manifest devices"
-grep -q '^TERRA_PWM_PORTS=P0,P1,P2,P3,P4,P5$' <<< "$manifest" || fail "manifest PWM ports"
 ok "build manifest"
 
 # Vendor audio/voice packages must not be pulled in by the image.
