@@ -1,2 +1,5 @@
 work/*
 site/__pycache__
+website/node_modules/
+website/dist/
+website/.astro/

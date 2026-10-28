@@ -6,6 +6,8 @@ Targets **Raspberry Pi 4 and Pi 5** (64-bit). The root filesystem uses 4K blocks
 
 This tree is an rpi-image-gen source directory (`-S examples/terra`) plus `config/terra.yaml`. Upstream layers are not modified.
 
+The guides are also on the web at [super-yojan.dev/terra-image-gen](https://super-yojan.dev/terra-image-gen/). That site is the Astro project in `website/` (`npm ci && npm run build`), and its pages are this file, `docs/flash-with-imager.md` and `HARDWARE-CHECKLIST.md`.
+
 ## Build
 
 Host packages (Debian or Ubuntu, including amd64 with qemu-user):

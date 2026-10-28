@@ -1,0 +1,128 @@
+---
+import { Code } from "astro:components";
+import codeTheme from "../styles/shiki-pitch.json";
+import ProjectPage from "../layouts/ProjectPage.astro";
+import { href, link, menu } from "../consts";
+
+const releases = "https://github.com/Super-Yojan/terra-image-gen/releases";
+const osList = "https://github.com/Super-Yojan/terra-image-gen/releases/latest/download/terra-os-list.json";
+const macos = `open -a 'Raspberry Pi Imager' --args --repo ${osList}`;
+---
+
+<ProjectPage
+    title="Terra image"
+    description="The Terra SD card image: 64-bit Raspberry Pi OS Bookworm for the Pi 4 and Pi 5 with the Fusion HAT driver and terra-rover installed."
+    lede="One SD card image for every Terra rover. Flash it with Raspberry Pi Imager and the Pi boots ready to drive."
+    figureLabel="Fig. 01 — Terra in Raspberry Pi Imager"
+    figureAlt="The Terra icon: a six-wheeled rover on a forest road, as it appears in the Imager OS list."
+    poster={href("/media/terra-icon.png")}
+    posterWidth={480}
+    posterHeight={480}
+    figureNote="Terra (64-bit) in the Imager list"
+    primary={{ href: "#quick-start", label: "Get Started" }}
+    secondary={{ href: releases, label: "Download" }}
+    aboutTitle="Raspberry Pi OS, ready for the rover."
+    sectionId="quick-start"
+    sectionTitle="Quick start."
+    sectionLede="From a blank card to SSH on the Pi. The guides below cover each step in full."
+    links={menu.map((page) => ({ href: link(page.path), label: page.label }))}
+>
+    <Fragment slot="prose">
+        <p>
+            The Terra image is 64-bit Raspberry Pi OS Bookworm with the Fusion
+            HAT kernel driver and the <code>terra-rover</code> service already
+            installed. Flash the same image to any number of cards: each card
+            gets its own hostname, machine-id and SSH host keys on first boot.
+        </p>
+        <p>
+            The image contains no password, Wi-Fi password, SSH key or paired
+            phone. Raspberry Pi Imager adds the login, Wi-Fi and SSH while it
+            writes the card, and you pair TerraPhone after boot.
+        </p>
+        <p>
+            It is built with rpi-image-gen from <code>examples/terra</code>.
+            The <a href={link("/hardware-checklist")}>hardware checklist</a>
+            lists what has not yet been checked on a real Pi.
+        </p>
+    </Fragment>
+    <Fragment slot="facts">
+        <div>
+            <dt class="t-label">Boards</dt>
+            <dd>Raspberry Pi 4 and Pi 5, 64-bit</dd>
+        </div>
+        <div>
+            <dt class="t-label">OS</dt>
+            <dd>Raspberry Pi OS Bookworm, arm64</dd>
+        </div>
+        <div>
+            <dt class="t-label">Rover service</dt>
+            <dd><code>terra-rover</code> <code>0.3.0</code></dd>
+        </div>
+        <div>
+            <dt class="t-label">Card</dt>
+            <dd>microSD, 8 GB or more</dd>
+        </div>
+        <div>
+            <dt class="t-label">USB SSH</dt>
+            <dd><code>192.168.77.1</code> (Pi 4)</dd>
+        </div>
+        <div>
+            <dt class="t-label">Hotspot</dt>
+            <dd><code>Terra-xxxxxx</code>, <code>192.168.78.1</code></dd>
+        </div>
+    </Fragment>
+    <Fragment slot="steps">
+        <li>
+            <p class="t-label">01</p>
+            <div class="prose">
+                <h3>Open Imager on the Terra list</h3>
+                <p>
+                    Install <a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a>
+                    1.8 or newer, quit it, then open it on the Terra OS list. On macOS:
+                </p>
+                <Code code={macos} lang="sh" theme={codeTheme} wrap={false} />
+                <p>
+                    <a href={link("/flash")}>Flash a card</a> has the Linux and Windows commands.
+                </p>
+            </div>
+        </li>
+        <li>
+            <p class="t-label">02</p>
+            <div class="prose">
+                <h3>Choose and customise</h3>
+                <p>
+                    Pick your Pi, <strong>Terra (64-bit)</strong> and the card.
+                    In <strong>Edit settings</strong>, set a username, password,
+                    Wi-Fi and SSH. Then write.
+                </p>
+            </div>
+        </li>
+        <li>
+            <p class="t-label">03</p>
+            <div class="prose">
+                <h3>Boot and log in</h3>
+                <p>
+                    The first start applies your settings and reboots once.
+                    Give it about two minutes, then
+                    <code>ssh USERNAME@HOSTNAME.local</code>.
+                </p>
+                <p>
+                    <a href={link("/build")}>Build the image</a> covers USB, the
+                    hotspot and Wi-Fi from the boot partition.
+                </p>
+            </div>
+        </li>
+        <li>
+            <p class="t-label">04</p>
+            <div class="prose">
+                <h3>Pair TerraPhone</h3>
+                <p>
+                    Hold the Fusion HAT <strong>USR</strong> button for three
+                    seconds and accept <strong>Connect</strong> in TerraPhone.
+                    The <a href="https://super-yojan.dev/Terra/hardware/FLASH_SD/">Terra
+                    guide</a> has screenshots of every step.
+                </p>
+            </div>
+        </li>
+    </Fragment>
+</ProjectPage>

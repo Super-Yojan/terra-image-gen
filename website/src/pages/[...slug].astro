@@ -1,0 +1,29 @@
+---
+import { getCollection, render } from "astro:content";
+import DocPage from "../layouts/DocPage.astro";
+import { menu } from "../consts";
+
+export async function getStaticPaths() {
+    const docs = await getCollection("docs");
+    return docs.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content, remarkPluginFrontmatter: fm } = await render(entry);
+const current = `/${entry.id}`;
+const section = { title: "Guides", pages: menu };
+const kicker = "Terra image";
+const source = `https://github.com/Super-Yojan/terra-image-gen/blob/master/examples/terra/${entry.filePath?.replace(/^.*examples\/terra\//, "")}`;
+---
+
+<DocPage
+    title={fm.title ?? entry.id}
+    description={fm.description}
+    section={section}
+    current={current}
+    kicker={kicker}
+    repoHref={source}
+    repoLabel="Source on GitHub"
+>
+    <Content />
+</DocPage>
