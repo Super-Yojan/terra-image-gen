@@ -104,8 +104,10 @@ jobs:
           RELEASE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          xz=$(find work -type f -path '*/deploy-*/terra-bookworm-arm64.img.xz' | head -n 1)
-          test -n "$xz"
+          # A glob, not find: find exits non-zero on the root-only chroot dirs.
+          set -- work/deploy-*/terra-bookworm-arm64.img.xz
+          xz=$1
+          test -f "$xz"
           deploy=$(dirname "$xz")
           dist="$RUNNER_TEMP/dist"
           mkdir -p "$dist"
