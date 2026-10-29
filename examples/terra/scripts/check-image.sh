@@ -177,10 +177,20 @@ if [[ $allow_lab -eq 0 ]]; then
    fi)
    [[ -z $creds ]] || fail "Wi-Fi or user credentials baked in: $creds"
    if exists "$root/etc/shadow"; then
-      hashed=$(readf "$root/etc/shadow" | awk -F: '$2 ~ /^\$/ { print $1 }')
+      hashed=$(readf "$root/etc/shadow" | awk -F: '$1!="pi" && $2 ~ /^\$/ { print $1 }')
       [[ -z $hashed ]] || fail "password hashes in /etc/shadow: $hashed"
       pi_pw=$(readf "$root/etc/shadow" | awk -F: '$1=="pi" { print $2 }')
-      [[ $pi_pw == '*' ]] || fail "pi shadow password is '$pi_pw' (want * so public keys work and no password is set)"
+      if exists "$root/etc/terra-image/default-password"; then
+         # The only password allowed in the image is the documented shared default.
+         default_pw=$(readf "$root/etc/terra-image/default-password" | head -n 1)
+         [[ $pi_pw == '$6$'* ]] || fail "pi has no hash for the shared default password"
+         salt=${pi_pw#\$6\$}; salt=${salt%%\$*}
+         [[ $(openssl passwd -6 -salt "$salt" "$default_pw") == "$pi_pw" ]] || fail "pi password is not the shared default password"
+         mode=$(if [[ $cleanup_mount -eq 1 ]]; then sudo stat -c '%a %u' "$root/etc/terra-image/default-password"; else stat -c '%a %u' "$root/etc/terra-image/default-password"; fi)
+         [[ ${mode%% *} == 600 ]] || fail "default-password file mode is ${mode%% *}, want 600"
+      else
+         [[ $pi_pw == '*' ]] || fail "pi shadow password is '$pi_pw' (want * so public keys work and no password is set)"
+      fi
    else
       fail "missing /etc/shadow"
    fi
@@ -195,7 +205,7 @@ if [[ $allow_lab -eq 0 ]]; then
          fail "hotspot credentials baked in: $credentials"
       fi
    done
-   ok "no Wi-Fi credentials, password hashes, or SSH public keys"
+   ok "no Wi-Fi credentials, SSH public keys, or passwords other than the shared default"
 fi
 
 exists "$root/etc/terra-rover/rover.env" || fail "missing /etc/terra-rover/rover.env"

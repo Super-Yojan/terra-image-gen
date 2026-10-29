@@ -114,3 +114,26 @@ if grep -q -- '--gate-file' "$unit"; then
 fi
 envfile=$root/etc/terra-rover/rover.env
 [[ -f $envfile ]] || { echo "terra: missing $envfile" >&2; exit 1; }
+
+# Shared default password: the login password of the first user and the
+# hotspot passphrase. Imager, custom.toml and terra-network.conf replace it.
+default_pw=${IGconf_terra_default_password:-}
+rm -f "$root/etc/terra-image/default-password"
+if [[ -n $default_pw ]]; then
+   [[ ${#default_pw} -ge 8 && ${#default_pw} -le 63 && $default_pw =~ ^[[:print:]]+$ ]] || {
+      echo "terra: default_password must be 8 to 63 printable characters" >&2
+      exit 1
+   }
+   login=${IGconf_device_user1:-pi}
+   hash=$(openssl passwd -6 "$default_pw")
+   shadow=$root/etc/shadow
+   grep -q "^${login}:" "$shadow" || { echo "terra: no $login in /etc/shadow" >&2; exit 1; }
+   awk -F: -v OFS=: -v u="$login" -v p="$hash" '$1==u { $2=p } { print }' "$shadow" > "$shadow.terra"
+   chmod --reference="$shadow" "$shadow.terra"
+   chown --reference="$shadow" "$shadow.terra"
+   mv "$shadow.terra" "$shadow"
+   install -d -m 0755 "$root/etc/terra-image"
+   printf '%s\n' "$default_pw" > "$root/etc/terra-image/default-password"
+   chmod 0600 "$root/etc/terra-image/default-password"
+   echo "terra: $login password and hotspot passphrase default to the shared default password"
+fi

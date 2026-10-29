@@ -68,8 +68,19 @@
 # X-Env-Var-fusion_driver_version-Valid: regex:^[0-9]+\.[0-9]+\.[0-9]+$
 # X-Env-Var-fusion_driver_version-Set: y
 #
+# X-Env-Var-default_password: raspberrypi
+# X-Env-Var-default_password-Desc: Shared default password. It is the pi login
+#  password (SSH and console) and the Terra- hotspot passphrase, so a card that
+#  was flashed without Imager settings can still be reached. Raspberry Pi
+#  Imager, a custom.toml, or terra-network.conf on the boot partition replace
+#  it. Empty keeps the old behaviour: no pi password and a random hotspot
+#  passphrase per card. 8 to 63 printable characters.
+# X-Env-Var-default_password-Valid: string-or-empty
+# X-Env-Var-default_password-Set: y
+#
 # X-Env-Var-lab_ssh: y
 # X-Env-Var-lab_ssh-Desc: When y (the default), sshd is enabled. No password
+#  beyond default_password
 #  and no authorized_keys are baked in. Set n to ship sshd disabled; an empty
 #  ssh file on the boot partition still turns it on at first boot. Host keys
 #  are never baked in.

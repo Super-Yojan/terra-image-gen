@@ -196,6 +196,7 @@ TERRA_GIT_REF=${IGconf_terra_source_ref:-}
 IMAGE_GIT=$gitrev
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-}
 LAB_SSH=${IGconf_terra_lab_ssh:-y}
+DEFAULT_PASSWORD=$([[ -n ${IGconf_terra_default_password:-} ]] && echo set || echo unset)
 LAB_WIFI=$([[ -n ${IGconf_terra_lab_wifi_ssid:-} ]] && echo set || echo unset)
 EOF
 chmod 0644 "$root/etc/terra-image-release"
