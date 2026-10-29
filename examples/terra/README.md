@@ -113,9 +113,11 @@ hotspot. `WIFI_MODE=hotspot` starts it at boot and does not try saved networks.
 Set the regulatory country for your location. An empty SSID uses the Pi
 identity. An empty timeout uses the default. Each timeout is a whole number of
 seconds from 1 to 3600. The boot file is validated, copied into the protected
-root configuration, and removed from FAT. A missing passphrase generates a
-unique 24-character password on the device; retrieve it through USB SSH from
-the root-only configuration. There is no shared default password. Do not
+root configuration, and removed from FAT. A missing passphrase uses the
+image's shared default password, `raspberrypi` (`terra.default_password`). An
+image built with an empty `terra.default_password` generates a unique
+24-character passphrase on the device instead; retrieve it through USB SSH from
+the root-only configuration. Do not
 publish an image containing your provisioning file or an initialized network
 configuration. A card that already booted with `WIFI_MODE=hotspot` keeps that
 mode until you edit this file. No rover arming or motion setting changes.
@@ -128,7 +130,11 @@ and safe secret parsing.
 
 `terra-firstboot.service` copies headless-access files off the FAT boot partition, sets the hostname to `terra-` plus the last six hex digits of the Pi serial (or a random suffix when no serial exists), and grows the root filesystem to the card. systemd generates `machine-id` because the file ships empty. SSH host keys are absent from the image; `ssh-hostkeys-generate.service` creates a new set before sshd listens. `terra-rover` generates `terra-XXXXXX` itself the first time it can write `/var/lib/terra-rover/device-name.json`. That file is not in the image.
 
-sshd is enabled. The `pi` account has no password (`*` in `/etc/shadow`, not a lock). A public key works. Password login works after Raspberry Pi Imager, or a `custom.toml` on the boot partition, sets a password. Until then sshd has nothing to accept. `pi` can `sudo` without a password. Nothing in the image is a shared default password. If a flasher rewrote `config.txt` and dropped the Fusion HAT lines, first boot puts them back and reboots once. A hostname Imager already set is kept; the serial name is only used when the hostname is still the placeholder `terra`.
+sshd is enabled. The `pi` account's password is the shared default, `raspberrypi`, and password login over SSH works out of the box. Raspberry Pi Imager, or a `custom.toml` on the boot partition, replaces it. If Imager installs a public key it also turns SSH password login off. `pi` can `sudo` without a password.
+
+The shared default is a convenience for lab rovers. Anyone near a rover who knows it can join the `Terra-` hotspot and log in as `pi` with root access through `sudo`. Set your own password in Imager, or build with `terra.default_password` empty (the image then has no password and a random hotspot passphrase per card), for any rover outside the lab.
+
+If a flasher rewrote `config.txt` and dropped the Fusion HAT lines, first boot puts them back and reboots once. A hostname Imager already set is kept; the serial name is only used when the hostname is still the placeholder `terra`.
 
 The USR button only opens `terra-rover`'s pairing window. sshd does not wait on that button, on Bluetooth, or on `terra-rover.service`. Holding the button is not required to recover the Pi over SSH.
 
@@ -224,7 +230,7 @@ The script refuses the disk that holds `/` and refuses non-removable disks. `bma
 sudo ./examples/terra/scripts/check-image.sh --image work/deploy-*/terra-bookworm-arm64.img
 ```
 
-This mounts the root filesystem and the FAT boot partition. It checks the binary (`terra-rover --check-bundle` under qemu-user on a non-arm64 host), the enabled service, the account, the Fusion HAT module, the Fusion HAT `config.txt` lines and the overlay on the boot partition, that sshd is enabled and the image ships no password, that the Imager `firstrun.sh` fixup is in the initramfs, and the absence of host keys, machine-id, an owner bond, and credentials.
+This mounts the root filesystem and the FAT boot partition. It checks the binary (`terra-rover --check-bundle` under qemu-user on a non-arm64 host), the enabled service, the account, the Fusion HAT module, the Fusion HAT `config.txt` lines and the overlay on the boot partition, that sshd is enabled and the only password in the image is the shared default, that the Imager `firstrun.sh` fixup is in the initramfs, and the absence of host keys, machine-id, an owner bond, and credentials.
 
 `scripts/test-check-fixture.sh` runs the same checker against a synthetic root so the negative cases stay covered without a full image build.
 

@@ -125,4 +125,21 @@ for secret in root-config hostapd boot-config; do
 done
 printf 'HOTSPOT_PASSPHRASE=\n' > "$good/etc/terra-image/network.conf"
 "$check" --root "$good" --skip-exec
+
+# The shared default password is the one password the image may carry.
+shared=$tmp/shared
+cp -a "$good" "$shared"
+printf 'raspberrypi\n' > "$shared/etc/terra-image/default-password"
+chmod 0600 "$shared/etc/terra-image/default-password"
+hash=$(openssl passwd -6 raspberrypi)
+awk -F: -v OFS=: -v p="$hash" '$1=="pi" { $2=p } { print }' "$good/etc/shadow" > "$shared/etc/shadow"
+"$check" --root "$shared" --skip-exec
+wrong=$tmp/wrong-default
+cp -a "$shared" "$wrong"
+hash=$(openssl passwd -6 something-else)
+awk -F: -v OFS=: -v p="$hash" '$1=="pi" { $2=p } { print }' "$good/etc/shadow" > "$wrong/etc/shadow"
+if "$check" --root "$wrong" --skip-exec; then
+   echo "fixture: a pi password other than the shared default was accepted" >&2
+   exit 1
+fi
 echo "fixture checks passed"

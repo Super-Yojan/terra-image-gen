@@ -94,6 +94,22 @@ cp "$other/etc/terra-image/network.conf" "$tmp/generated.conf"
 TERRA_ROOT=$other TERRA_BOOT=$tmp/otherboot bash "$setup" --configure-only
 cmp "$tmp/generated.conf" "$other/etc/terra-image/network.conf"
 grep -Eq '^HOTSPOT_PASSPHRASE=[0-9a-f]{24}$' "$tmp/generated.conf"
+# An image built with a shared default password uses it for the hotspot.
+shared=$tmp/shared
+mkdir -p "$shared/etc/terra-image" "$shared/proc/device-tree" "$tmp/sharedboot"
+printf '0000000012345678' > "$shared/proc/device-tree/serial-number"
+printf 'raspberrypi\n' > "$shared/etc/terra-image/default-password"
+TERRA_ROOT=$shared TERRA_BOOT=$tmp/sharedboot bash "$setup" --configure-only
+grep -qx 'HOTSPOT_PASSPHRASE=raspberrypi' "$shared/etc/terra-image/network.conf"
+grep -qx 'wpa_passphrase=raspberrypi' "$shared/etc/hostapd/hostapd.conf"
+# terra-network.conf on the boot partition still wins over the shared default.
+shared2=$tmp/shared2
+mkdir -p "$shared2/etc/terra-image" "$shared2/proc/device-tree" "$tmp/shared2boot"
+printf '0000000012345678' > "$shared2/proc/device-tree/serial-number"
+printf 'raspberrypi\n' > "$shared2/etc/terra-image/default-password"
+printf 'HOTSPOT_PASSPHRASE=my-own-passphrase\n' > "$tmp/shared2boot/terra-network.conf"
+TERRA_ROOT=$shared2 TERRA_BOOT=$tmp/shared2boot bash "$setup" --configure-only
+grep -qx 'HOTSPOT_PASSPHRASE=my-own-passphrase' "$shared2/etc/terra-image/network.conf"
 grep -qx 'WIFI_MODE=fallback' "$tmp/generated.conf"
 grep -qx 'WIFI_CONNECT_TIMEOUT=30' "$tmp/generated.conf"
 grep -qx 'WIFI_RETRY_TIMEOUT=15' "$tmp/generated.conf"

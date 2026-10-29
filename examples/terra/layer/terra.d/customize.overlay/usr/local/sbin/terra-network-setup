@@ -320,6 +320,10 @@ configure_network() {
  normalize_timeouts
  [[ -n $ssid ]] || ssid=Terra-${serial: -6}
  [[ ${#ssid} -ge 1 && ${#ssid} -le 32 ]] || fail 'hotspot SSID must contain 1 to 32 bytes'
+ # The image's shared default, if the build set one; otherwise a random one.
+ if [[ -z $passphrase && -s $root/etc/terra-image/default-password ]]; then
+  passphrase=$(head -n 1 "$root/etc/terra-image/default-password")
+ fi
  [[ -n $passphrase ]] || passphrase=$(openssl rand -hex 12)
  [[ ${#passphrase} -ge 8 && ${#passphrase} -le 63 && $passphrase =~ ^[[:print:]]+$ ]] || fail 'hotspot passphrase must contain 8 to 63 bytes on one line'
  # Never source or evaluate operator-supplied configuration.

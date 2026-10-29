@@ -51,7 +51,7 @@ Imager 1.8 and 1.9 show a gear icon, or the shortcut Ctrl+Shift+X, after you cho
 Set:
 
 - **hostname**, if you want a fixed name. Leave it blank and the card names itself `terra-` plus the last six hex digits of the Pi serial.
-- **username and password**. This password is the one that logs in. The image does not ship a password of its own.
+- **username and password**. This password replaces the image's shared default. Without Imager settings the login is `pi` / `raspberrypi`, and the hotspot passphrase is also `raspberrypi`.
 - **Wi-Fi** SSID, password, and country. The country must be the regulatory country of the network.
 - **locale**: time zone and keyboard.
 - **SSH**. To log in with the password you just set, enable SSH and choose password authentication. To log in with a key instead, choose public-key authentication and paste the public key. If you set a public key, Imager turns password login off for that card.
@@ -82,4 +82,4 @@ Each release page lists the sha256 and size of `terra-bookworm-arm64.img.xz` and
 
 ## What the image does not contain
 
-No Wi-Fi password, no SSH key, and no login password are baked into the file you download. Each card gets its own machine-id and SSH host keys on first boot. Treat the first boot of each new release on hardware as a test.
+No Wi-Fi password and no SSH key are baked into the file you download. The only password in it is the shared default `raspberrypi` for the `pi` login and the hotspot. Anyone nearby who knows it can join the hotspot and log in, so set your own password in step 4 for a rover that leaves the lab. Each card gets its own machine-id and SSH host keys on first boot. Treat the first boot of each new release on hardware as a test.
