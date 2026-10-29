@@ -183,7 +183,7 @@ jobs:
             echo "- uncompressed sha256: \`${ex_sha}\`"
             echo "- uncompressed size: ${ex_size} bytes"
             echo
-            echo "No password, Wi-Fi password or SSH key is baked in. Raspberry Pi Imager sets them while it writes the card."
+            echo "Default login \`pi\` / \`raspberrypi\`; the \`Terra-\` hotspot passphrase is also \`raspberrypi\`. Set your own password in Raspberry Pi Imager before the rover leaves the lab. No Wi-Fi network or SSH key is baked in."
           } > "$RUNNER_TEMP/notes.md"
 
           gh release create "${RELEASE_TAG}" "${target[@]}" "${flags[@]}" \
